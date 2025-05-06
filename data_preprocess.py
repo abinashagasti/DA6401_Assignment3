@@ -3,10 +3,10 @@ from torch.utils.data import Dataset, DataLoader
 import csv
 
 # Tokens apart from the alphabet
-PAD_TOKEN = "<pad>" # denotes a padding element in the character sequence
-SOS_TOKEN = "<sos>" # denotes start of sequence token for decoder model
-EOS_TOKEN = "<eos>" # denotes end of sequence token for decoder model
-UNK_TOKEN = "<unk>" # token for unknown characters
+PAD_TOKEN = "<PAD>" # denotes a padding element in the character sequence
+SOS_TOKEN = "<GO>" # denotes start of sequence token for decoder model
+EOS_TOKEN = "<STOP>" # denotes end of sequence token for decoder model
+UNK_TOKEN = "<UNK>" # token for unknown characters
 
 class Vocab:
     # Constructor
@@ -117,8 +117,8 @@ def collate_fn(batch, source_pad_idx, target_pad_idx):
     '''
     src_batch, tgt_batch = zip(*batch) # get source and target batches separately from input dataset batch
 
-    src_lens = [len(x) for x in src_batch] # length of sequences in source batch
-    tgt_lens = [len(x) for x in tgt_batch] # length of sequences in target batch
+    # src_lens = [len(x) for x in src_batch] # length of sequences in source batch
+    # tgt_lens = [len(x) for x in tgt_batch] # length of sequences in target batch
 
     src_padded = torch.nn.utils.rnn.pad_sequence(
         [torch.tensor(seq) for seq in src_batch],
@@ -133,7 +133,7 @@ def collate_fn(batch, source_pad_idx, target_pad_idx):
 
     return src_padded, tgt_padded #, src_lens, tgt_lens
 
-def prepare_dataloaders(train_file_path, val_file_path, test_file_path, batch_size=32):
+def prepare_dataloaders(train_file_path, val_file_path, test_file_path, batch_size=32, repeat_datapoints=True):
     '''
     This function prepares the train, validation, and test DataLoaders for the transliteration task.
 
@@ -147,6 +147,7 @@ def prepare_dataloaders(train_file_path, val_file_path, test_file_path, batch_si
         - val_file_path (str): path to the validation data (tsv file).
         - test_file_path (str): path to the test data (tsv file).
         - batch_size (int): batch size for the DataLoaders (default: 32).
+        - repeat_datapoints (bool): retain duplicates in dataset (default: True).
 
     Outputs:
         - train_loader (DataLoader): DataLoader for training data
@@ -168,7 +169,7 @@ def prepare_dataloaders(train_file_path, val_file_path, test_file_path, batch_si
             target_vocab.add_string(target)
 
     # Create datasets
-    train_dataset = TransliterationDataset(train_file_path, source_vocab, target_vocab)
+    train_dataset = TransliterationDataset(train_file_path, source_vocab, target_vocab, repeat_datapoints=repeat_datapoints)
     val_dataset = TransliterationDataset(val_file_path, source_vocab, target_vocab)
     test_dataset = TransliterationDataset(test_file_path, source_vocab, target_vocab)
 

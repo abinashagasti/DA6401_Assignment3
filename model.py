@@ -21,6 +21,7 @@ class Encoder(nn.Module):
         super().__init__()
 
         self.embedding = nn.Embedding(input_dim, emb_dim, padding_idx=pad_idx)
+        self.dropout = nn.Dropout(p = dropout)
         self.rnn_type = rnn_type.lower()
 
         if self.rnn_type == 'rnn':
@@ -37,7 +38,7 @@ class Encoder(nn.Module):
 
     def forward(self, input):
         # src shape: (batch_size, src_seq_len)
-        embedded = self.embedding(input)  # shape: (batch_size, src_seq_len, emb_dim)
+        embedded = self.dropout(self.embedding(input))  # shape: (batch_size, src_seq_len, emb_dim)
         outputs, hidden = self.rnn(embedded)  # outputs: (batch_size, src_seq_len, hidden_dim)
         return outputs, hidden
 
@@ -61,6 +62,7 @@ class Decoder(nn.Module):
         super().__init__()
 
         self.embedding = nn.Embedding(output_dim, emb_dim, padding_idx=pad_idx)
+        self.dropout = nn.Dropout(p = dropout)
         self.rnn_type = rnn_type.lower()
         self.output_dim = output_dim
 
@@ -88,7 +90,7 @@ class Decoder(nn.Module):
             hidden: updated hidden state(s)
         '''
         input = input.unsqueeze(1)  # (batch_size) → (batch_size, 1)
-        embedded = self.embedding(input)  # (batch_size, 1, emb_dim)
+        embedded = self.dropout(self.embedding(input))  # (batch_size, 1, emb_dim)
 
         output, hidden = self.rnn(embedded, hidden)  # output: (batch_size, 1, hidden_dim)
         prediction = self.fc_out(output.squeeze(1))  # (batch_size, output_dim)

@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 
 from tqdm import tqdm
-import torch
+import wandb
 
 def compute_token_accuracy(preds, targets, pad_idx):
     mask = targets != pad_idx
@@ -57,9 +57,9 @@ def compute_sequence_accuracy(preds, targets, pad_idx, min_match_ratio=1.0):
 #             correct += 1
 #     return correct, total
 
-def train_model(model, train_loader, val_loader, optimizer, criterion,
-                target_vocab, device, num_epochs=10, teacher_forcing_ratio=None,
-                patience=3, min_delta=0.001, accuracy_mode='token', min_match_ratio=1.0):
+def train_model(model, train_loader, val_loader, optimizer, criterion, target_vocab,
+                device, num_epochs=10, teacher_forcing_ratio=None, patience=3,
+                min_delta=0.001, accuracy_mode='token', min_match_ratio=1.0, wandb_log=False):
     """
     Trains a Seq2Seq model.
 
@@ -148,7 +148,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion,
         if accuracy_mode == 'token' or accuracy_mode == 'word':
             train_acc = train_correct / train_total * 100
         else:
-            train_token_acc = train_token_correct / train_token_total * 100
+            train_acc = train_token_correct / train_token_total * 100
             train_word_acc = train_word_correct / train_word_total * 100
 
         # --- Validation ---
@@ -207,18 +207,28 @@ def train_model(model, train_loader, val_loader, optimizer, criterion,
         if accuracy_mode == 'token' or accuracy_mode == 'word':
             val_acc = val_correct / val_total * 100
         else:
-            val_token_acc = val_token_correct / val_token_total * 100
+            val_acc = val_token_correct / val_token_total * 100
             val_word_acc = val_word_correct / val_word_total * 100
 
         # --- Logging ---
+        # Log to wandb if enabled
+        if wandb_log:
+                wandb.log({
+                    "epoch": epoch,
+                    "training_loss": train_loss,
+                    "training_accuracy": train_acc,
+                    "validation_loss": val_loss,
+                    "validation_accuracy": val_acc
+                })    
+        
         if accuracy_mode == 'token' or accuracy_mode == 'word':
             print(f"Epoch {epoch:02d} ➤ "
               f"Train Loss: {train_loss:.4f}, Acc ({accuracy_mode}): {train_acc:.2f}% | "
               f"Val Loss: {val_loss:.4f}, Acc ({accuracy_mode}): {val_acc:.2f}%")
         else:
             print(f"Epoch {epoch:02d} ➤ "
-              f"Train Loss: {train_loss:.4f}, Acc (token): {train_token_acc:.2f}%, Acc (word): {train_word_acc:.2f}% | "
-              f"Val Loss: {val_loss:.4f}, Acc (token): {val_token_acc:.2f}%, Acc (word): {val_word_acc:.2f}% ")
+              f"Train Loss: {train_loss:.4f}, Acc (token): {train_acc:.2f}%, Acc (word): {train_word_acc:.2f}% | "
+              f"Val Loss: {val_loss:.4f}, Acc (token): {val_acc:.2f}%, Acc (word): {val_word_acc:.2f}% ")
 
         # --- Early Stopping Check ---
         if val_loss < best_val_loss - min_delta:

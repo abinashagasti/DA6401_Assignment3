@@ -44,7 +44,7 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
 
     # Training loop
-    train_model(model, train_loader, val_loader, optimizer, criterion, tgt_vocab, device, num_epochs, teacher_forcing_ratio=None, accuracy_mode='both', min_match_ratio=0.5)
+    train_model(model, train_loader, val_loader, optimizer, criterion, tgt_vocab, device, num_epochs, teacher_forcing_ratio=None, accuracy_mode='token', min_match_ratio=0.5)
 
 if __name__ == '__main__':
-    main()
+    main() 

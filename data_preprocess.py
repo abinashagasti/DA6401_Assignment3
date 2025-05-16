@@ -21,6 +21,9 @@ class Vocab:
             self.add_token(token)
 
         self.pad_idx = self.token_to_idx[PAD_TOKEN]
+        self.sos_idx = self.token_to_idx[SOS_TOKEN]
+        self.eos_idx = self.token_to_idx[EOS_TOKEN]
+        self.unk_idx = self.token_to_idx[UNK_TOKEN]
 
         # add tokens passed into the constructor function
         if tokens:
@@ -175,7 +178,7 @@ def prepare_dataloaders(train_file_path, val_file_path, test_file_path, batch_si
     val_dataset = TransliterationDataset(val_file_path, source_vocab, target_vocab)
     test_dataset = TransliterationDataset(test_file_path, source_vocab, target_vocab)
 
-    collate = partial(collate_fn, source_pad_idx=source_vocab.pad_idx, target_pad_idx = target_vocab.pad_idx)
+    # collate = partial(collate_fn, source_pad_idx=source_vocab.pad_idx, target_pad_idx = target_vocab.pad_idx)
 
     # Create DataLoaders
     train_loader = DataLoader(
@@ -183,9 +186,9 @@ def prepare_dataloaders(train_file_path, val_file_path, test_file_path, batch_si
         batch_size=batch_size,
         shuffle=True,
         pin_memory=True,
-        num_workers=num_workers,
-        collate_fn=collate
-        # collate_fn=lambda batch: collate_fn(batch, source_vocab.pad_idx, target_vocab.pad_idx)
+        # num_workers=num_workers,
+        # collate_fn=collate
+        collate_fn=lambda batch: collate_fn(batch, source_vocab.pad_idx, target_vocab.pad_idx)
     )
 
     val_loader = DataLoader(
@@ -193,9 +196,9 @@ def prepare_dataloaders(train_file_path, val_file_path, test_file_path, batch_si
         batch_size=batch_size,
         shuffle=False,
         pin_memory=True,
-        num_workers=num_workers,
-        collate_fn=collate
-        # collate_fn=lambda batch: collate_fn(batch, source_vocab.pad_idx, target_vocab.pad_idx)
+        # num_workers=num_workers,
+        # collate_fn=collate
+        collate_fn=lambda batch: collate_fn(batch, source_vocab.pad_idx, target_vocab.pad_idx)
     )
 
     test_loader = DataLoader(
@@ -203,9 +206,9 @@ def prepare_dataloaders(train_file_path, val_file_path, test_file_path, batch_si
         batch_size=batch_size,
         shuffle=False,
         pin_memory=True,
-        num_workers=num_workers,
-        collate_fn=collate
-        # collate_fn=lambda batch: collate_fn(batch, source_vocab.pad_idx, target_vocab.pad_idx)
+        # num_workers=num_workers,
+        # collate_fn=collate
+        collate_fn=lambda batch: collate_fn(batch, source_vocab.pad_idx, target_vocab.pad_idx)
     )
 
     return train_loader, val_loader, test_loader, source_vocab, target_vocab

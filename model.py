@@ -130,7 +130,7 @@ class Seq2Seq(nn.Module):
         outputs = torch.zeros(batch_size, tgt_len, output_dim).to(self.device)
 
         # Encoder forward
-        _, hidden = self.encoder(src)
+        encoder_outputs, hidden = self.encoder(src)
 
         # First input to decoder is <sos>
         input_token = tgt[:, 0]

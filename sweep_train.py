@@ -12,8 +12,8 @@ def train():
     config = wandb.config # Config for wandb sweep
 
     # Experiment name
-    wandb.run.name = f"lr_{config.learning_rate}_#emb_{config.input_embedding_size}_#enc_layers_{config.encoder_num_layers}_cell_{config.cell_type}_\
-    #dec_layers_{config.decoder_num_layers}_hs_{config.hidden_layer_size}_bs_{config.batch_size}_drop_{config.dropout_prob}"
+    wandb.run.name = f"lr_{config.learning_rate}_#emb_{config.encoder_embedding_size}_{config.decode_embedding_size}_#enc_layers_{config.encoder_num_layers}_\
+    cell_{config.cell_type}_#dec_layers_{config.decoder_num_layers}_hs_{config.hidden_layer_size}_bs_{config.batch_size}_drop_{config.dropout_prob}"
 
     # Configs
     data_dir = 'dakshina_dataset_v1.0'
@@ -23,8 +23,8 @@ def train():
     dev_path = os.path.join(data_dir, lang, subfolder_dir, f'{lang}.translit.sampled.dev.tsv')
     test_path = os.path.join(data_dir, lang, subfolder_dir, f'{lang}.translit.sampled.test.tsv')
 
-    encoder_embedding_dim = config.input_embedding_size
-    decoder_embedding_dim = config.input_embedding_size
+    encoder_embedding_dim = config.encoder_embedding_size
+    decoder_embedding_dim = config.decoder_embedding_size
     hidden_dim = config.hidden_layer_size
     num_encoder_layers = config.encoder_num_layers
     num_decoder_layers = config.decoder_num_layers
@@ -34,7 +34,7 @@ def train():
     learning_rate = config.learning_rate
     dropout_prob = config.dropout_prob
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() and torch.backends.mps.is_built() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
 
     # Get dataloaders
@@ -50,9 +50,10 @@ def train():
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss(ignore_index=tgt_vocab.pad_idx)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
     # Training loop
-    train_model(model, train_loader, val_loader, optimizer, criterion, tgt_vocab, device, num_epochs, teacher_forcing_ratio=None, accuracy_mode='token', min_match_ratio=1)
+    train_model(model, train_loader, val_loader, optimizer, criterion, scheduler, tgt_vocab, device, num_epochs, teacher_forcing_ratio=None, accuracy_mode='token', min_match_ratio=1)
 
 if __name__ == '__main__':
     # mp.set_start_method('spawn')
@@ -77,4 +78,4 @@ if __name__ == '__main__':
     #     print(f"Sweep {sweep.id} stopped after {len(sweep.runs)} runs.")
 
     # Start sweep agent
-    wandb.agent(sweep_id, function=train, count=25, project=project)  # Run 10 experiments
+    wandb.agent(sweep_id, function=train, count=20, project=project)  # Run 10 experiments

@@ -26,11 +26,11 @@ def main(mode: str = 'train', wandb_log: bool = False):
     encoder_embedding_dim = 30
     decoder_embedding_dim = 67
     hidden_dim = 128
-    num_encoder_layers = 2
-    num_decoder_layers = 2
+    num_encoder_layers = 1
+    num_decoder_layers = 1
     rnn_type = 'LSTM'  # can be 'RNN' or 'GRU'
     batch_size = 64
-    num_epochs = 20
+    num_epochs = 2
     learning_rate = 0.01
     dropout_prob = 0.3
 
@@ -55,7 +55,8 @@ def main(mode: str = 'train', wandb_log: bool = False):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
         # Training loop
-        train_model(model, train_loader, val_loader, optimizer, criterion, tgt_vocab, device, scheduler, num_epochs, teacher_forcing_ratio=None, accuracy_mode='both', patience=7, wandb_log=wandb_log)
+        train_model(model, train_loader, val_loader, optimizer, criterion, src_vocab, tgt_vocab, device, scheduler,
+                     num_epochs, teacher_forcing_ratio=None, accuracy_mode='both', patience=7, wandb_log=wandb_log, beam_validate=False)
     
     elif mode == 'test':
         # Load checkpoint
@@ -75,5 +76,5 @@ def main(mode: str = 'train', wandb_log: bool = False):
 
 if __name__ == '__main__':
     mode = 'train'
-    wandb_log = True
+    wandb_log = False
     main(mode, wandb_log) 

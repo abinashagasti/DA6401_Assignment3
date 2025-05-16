@@ -54,7 +54,7 @@ def train():
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
     # Training loop
-    train_model(model, train_loader, val_loader, optimizer, criterion, tgt_vocab, device, scheduler, num_epochs, teacher_forcing_ratio=teacher_forcing_ratio, accuracy_mode='both', wandb_log=True)
+    train_model(model, train_loader, val_loader, optimizer, criterion, src_vocab, tgt_vocab, device, scheduler, num_epochs, teacher_forcing_ratio=teacher_forcing_ratio, accuracy_mode='both', wandb_log=True)
 
 if __name__ == '__main__':
     # mp.set_start_method('spawn')

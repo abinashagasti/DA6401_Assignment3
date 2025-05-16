@@ -11,6 +11,44 @@ def compute_token_accuracy(preds, targets, pad_idx):
     total = mask.sum().item()
     return correct, total
 
+def compute_token_accuracy_per_sample(pred_tokens, reference, pad_idx, eos_idx, device):
+    if eos_idx in pred_tokens:
+        pred_tokens = pred_tokens[1:pred_tokens.index(eos_idx)+1]
+    else:
+        pred_tokens = pred_tokens[1:]
+    if eos_idx in reference:
+        reference = reference[1:reference.index(eos_idx)+1]
+    else:
+        reference = reference[1:] 
+
+    if len(pred_tokens)<len(reference):
+        pred_tokens = pred_tokens + [pad_idx] * (len(reference) - len(pred_tokens))
+    elif len(pred_tokens)>len(reference):
+        reference = reference + [pad_idx] * (len(pred_tokens) - len(reference))
+    
+    targets = torch.tensor(reference).to(device)
+    preds = torch.tensor(pred_tokens).to(device)
+    
+    correct = (preds == targets).sum().item()
+    total = targets.size(0)
+
+    return correct, total
+
+def compute_token_accuracy_beam(model, src_batch, tgt_batch, source_vocab, target_vocab, beam_width, max_len=50, device=torch.device('cpu')):
+    for j in range(src_batch.size(0)):
+        src = src_batch[j].unsqueeze(0)  # shape: [1, src_len]
+        tgt = tgt_batch[j].unsqueeze(0)  # shape: [1, tgt_len]
+
+        # Beam search decoding
+        pred_tokens = beam_search_decode(model, src_tensor=src, src_vocab=source_vocab, tgt_vocab=target_vocab, beam_width=beam_width, max_len=max_len, device=device)
+        
+        # Reference tokens (excluding SOS, including EOS)
+        reference = tgt.squeeze(0).tolist()
+
+        correct, total = compute_token_accuracy_per_sample(pred_tokens, reference, pad_idx=target_vocab.pad_idx, eos_idx=target_vocab.eos_idx, device=device)
+
+        return correct, total
+
 def compute_sequence_accuracy(preds, targets, pad_idx, min_match_ratio=1.0):
     """
     Returns number of sequences where predicted sequence matches target,
@@ -40,9 +78,9 @@ def compute_sequence_accuracy(preds, targets, pad_idx, min_match_ratio=1.0):
 
     return correct, total    
 
-def train_model(model, train_loader, val_loader, optimizer, criterion, target_vocab,
+def train_model(model, train_loader, val_loader, optimizer, criterion, source_vocab, target_vocab,
                 device, scheduler=None, num_epochs=10, teacher_forcing_ratio=None, patience=5,
-                min_delta=0.001, accuracy_mode='token', min_match_ratio=1.0, wandb_log=False):
+                min_delta=0.001, accuracy_mode='both', min_match_ratio=1.0, wandb_log=False, beam_width=3, beam_validate=False):
     """
     Trains a Seq2Seq model.
 
@@ -161,7 +199,10 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, target_vo
 
                 preds = outputs_flat.argmax(1)
                 if accuracy_mode == 'token':
-                    correct, total = compute_token_accuracy(preds, tgt_flat, pad_idx)
+                    if beam_validate:
+                        correct, total = compute_token_accuracy_beam(model, src_batch, tgt_batch, source_vocab, target_vocab, beam_width=beam_width, max_len=50, device=device)
+                    else:
+                        correct, total = compute_token_accuracy(preds, tgt_flat, pad_idx)
                     val_correct += correct
                     val_total += total
                 elif accuracy_mode == 'word': 
@@ -171,7 +212,10 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, target_vo
                     val_correct += correct
                     val_total += total
                 else: 
-                    correct, total = compute_token_accuracy(preds, tgt_flat, pad_idx)
+                    if beam_validate:
+                        correct, total = compute_token_accuracy_beam(model, src_batch, tgt_batch, source_vocab, target_vocab, beam_width=beam_width, max_len=50, device=device)
+                    else:
+                        correct, total = compute_token_accuracy(preds, tgt_flat, pad_idx)
                     val_token_correct += correct
                     val_token_total += total
                     preds_seq = outputs[:, 1:].argmax(2)
@@ -328,44 +372,19 @@ def test_model(model, test_loader, source_vocab, target_vocab, device, beam_widt
 
                 # Beam search decoding
                 pred_tokens = beam_search_decode(model, src_tensor=src, src_vocab=source_vocab, tgt_vocab=target_vocab, beam_width=beam_width, max_len=50, device=device)
+                
                 # Reference tokens (excluding SOS, including EOS)
                 reference = tgt.squeeze(0).tolist()
-                pred_tokens = pred_tokens + [target_vocab.pad_idx] * (len(reference) - len(pred_tokens))
-        
-                if target_vocab.eos_idx in pred_tokens:
-                    pred_eos_idx = pred_tokens.index(target_vocab.eos_idx) + 1
-                else:
-                    len(pred_tokens)
-                reference_eos_idx = reference.index(target_vocab.eos_idx) + 1
-                list_len = max(pred_eos_idx, reference_eos_idx)
-                pred_tokens = pred_tokens[1:list_len]
-                reference = reference[1:list_len]
-                # if target_vocab.eos_idx in pred_tokens:
-                #     pred_tokens = pred_tokens[1:pred_tokens.index(target_vocab.eos_idx)+1]
-                # else:
-                #     pred_tokens = pred_tokens[1:]
-                # if target_vocab.eos_idx in reference:
-                #     reference = reference[1:reference.index(target_vocab.eos_idx)+1]
-                # else:
-                #     reference = reference[1:]
 
-                if not torch.is_tensor(reference):
-                    targets = torch.tensor(reference).to(device)
-                else:
-                    targets = reference
-                if not torch.is_tensor(pred_tokens):
-                    preds = torch.tensor(pred_tokens).to(device)
-                else:
-                    preds = pred_tokens
-
-                correct, total = compute_token_accuracy(preds, targets, target_vocab.pad_idx)
+                correct, total = compute_token_accuracy_per_sample(pred_tokens, reference, pad_idx=target_vocab.pad_idx, eos_idx=target_vocab.eos_idx, device=devicec)
+                
                 token_correct += correct
                 token_total += total
                 
                 if pred_tokens == reference:
                     word_correct += 1
                 word_total += 1
-                print(word_total)
+
                 # Save input/prediction/reference for logging
                 src_tokens = src.squeeze(0).tolist()
                 sources.append(source_vocab.decode(src_tokens))
@@ -386,7 +405,7 @@ def test_model(model, test_loader, source_vocab, target_vocab, device, beam_widt
 
     print(f"Test Results:")
     print(f"Token Accuracy: {token_acc:.2f}%")
-    print(f"Sequence Accuracy (Exact Match): {word_acc:.2f}%")
+    print(f"Word Accuracy (Exact Match): {word_acc:.2f}%")
 
     # Optional: print a creative grid
     print("Sample Predictions:")

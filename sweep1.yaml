@@ -18,10 +18,7 @@ parameters:
   hidden_layer_size:
     values: [64, 128, 256]
 
-  encoder_num_layers:
-    values: [1, 2, 3]
-
-  decoder_num_layers:
+  num_layers:
     values: [1, 2, 3]
 
   hidden_layer_size:
@@ -35,3 +32,6 @@ parameters:
 
   cell_type:
     values: ['RNN', 'LSTM', 'GRU']
+
+  teacher_forcing:
+    values: [null, 0.5, 0.75, 0.9, 1]

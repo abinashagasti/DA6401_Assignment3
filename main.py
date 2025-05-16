@@ -6,7 +6,15 @@ from data_preprocess import *
 from model import *
 from utils import *
 
-def main(mode: str = 'train'):
+def main(mode: str = 'train', wandb_log: bool = False):
+    user = "ee20d201-indian-institute-of-technology-madras"
+    project = "DA6401_Assignment_3"
+    display_name = "test_run"
+
+    if wandb_log:
+        wandb.init(entity=user, project=project, name=display_name)
+        # wandb.run.name = display_name
+    
     # Configs
     data_dir = 'dakshina_dataset_v1.0'
     lang = 'hi'  # Hindi
@@ -18,8 +26,8 @@ def main(mode: str = 'train'):
     encoder_embedding_dim = 30
     decoder_embedding_dim = 67
     hidden_dim = 128
-    num_encoder_layers = 1
-    num_decoder_layers = 1
+    num_encoder_layers = 2
+    num_decoder_layers = 2
     rnn_type = 'LSTM'  # can be 'RNN' or 'GRU'
     batch_size = 64
     num_epochs = 20
@@ -47,7 +55,7 @@ def main(mode: str = 'train'):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
         # Training loop
-        train_model(model, train_loader, val_loader, optimizer, criterion, tgt_vocab, device, scheduler, num_epochs, teacher_forcing_ratio=1, accuracy_mode='both', patience=7)
+        train_model(model, train_loader, val_loader, optimizer, criterion, tgt_vocab, device, scheduler, num_epochs, teacher_forcing_ratio=None, accuracy_mode='both', patience=7, wandb_log=wandb_log)
     
     elif mode == 'test':
         # Load checkpoint
@@ -61,7 +69,11 @@ def main(mode: str = 'train'):
 
     else:
         raise ValueError(f"mode = {mode} \nMode should be a string taking value either 'train' or 'test'.")
+    
+    if wandb_log:
+        wandb.finish()
 
 if __name__ == '__main__':
     mode = 'train'
-    main(mode) 
+    wandb_log = True
+    main(mode, wandb_log) 

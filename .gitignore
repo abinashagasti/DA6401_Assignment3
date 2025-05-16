@@ -5,3 +5,4 @@ saved_models/
 .ipynb_checkpoints/
 __pycache__/
 predictions_vanilla/
+wandb/

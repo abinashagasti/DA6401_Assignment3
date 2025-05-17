@@ -23,14 +23,14 @@ def main(mode: str = 'train', wandb_log: bool = False):
     dev_path = os.path.join(data_dir, lang, subfolder_dir, f'{lang}.translit.sampled.dev.tsv')
     test_path = os.path.join(data_dir, lang, subfolder_dir, f'{lang}.translit.sampled.test.tsv')
 
-    encoder_embedding_dim = 30
-    decoder_embedding_dim = 67
+    encoder_embedding_dim = 32
+    decoder_embedding_dim = 64
     hidden_dim = 128
     num_encoder_layers = 1
     num_decoder_layers = 1
-    rnn_type = 'LSTM'  # can be 'RNN' or 'GRU'
+    rnn_type = 'LSTM'  # can be 'RNN' or 'LSTM' or 'GRU'
     batch_size = 64
-    num_epochs = 2
+    num_epochs = 20 
     learning_rate = 0.01
     dropout_prob = 0.3
 

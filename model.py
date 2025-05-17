@@ -132,6 +132,12 @@ class Seq2Seq(nn.Module):
         # Encoder forward
         encoder_outputs, hidden = self.encoder(src)
 
+        if self.encoder.rnn_type == 'lstm':
+            hidden_state, cell = hidden
+            hidden = (hidden_state[-1:].contiguous(), cell[-1:].contiguous())
+        else:
+            hidden = hidden[-1:].contiguous()
+
         # First input to decoder is <sos>
         input_token = tgt[:, 0]
 

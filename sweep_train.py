@@ -1,6 +1,6 @@
 import torch
 from torch import nn, optim
-import os, wandb, yaml
+import os, wandb, yaml, time
 
 from data_preprocess import *
 from model import *
@@ -12,8 +12,8 @@ def train():
     config = wandb.config # Config for wandb sweep
 
     # Experiment name
-    wandb.run.name = f"lr_{config.learning_rate}_#emb_{config.encoder_embedding_size}_{config.decoder_embedding_size}_#enc_{config.encoder_num_layers}_\
-    #dec_{config.decoder_num_layers}_cell_{config.cell_type}_hs_{config.hidden_layer_size}_bs_{config.batch_size}_drop_{config.dropout_prob}_teacher_{config.teacher_forcing}"
+    wandb.run.name = f"lr_{config.learning_rate}_#emb_{config.encoder_embedding_size}_{config.decoder_embedding_size}_#layers_{config.num_layers}_\
+    _cell_{config.cell_type}_hs_{config.hidden_layer_size}_bs_{config.batch_size}_drop_{config.dropout_prob}_teacher_{config.teacher_forcing}"
 
     # Configs
     data_dir = 'dakshina_dataset_v1.0'
@@ -55,11 +55,13 @@ def train():
 
     # Training loop
     train_model(model, train_loader, val_loader, optimizer, criterion, src_vocab, tgt_vocab, device, scheduler,
-                     num_epochs, teacher_forcing_ratio=None, accuracy_mode='both', patience=7, wandb_log=True, beam_validate=True)
+                     num_epochs, teacher_forcing_ratio=teacher_forcing_ratio, accuracy_mode='both', patience=7, wandb_log=True, beam_validate=True)
+    
+    time.sleep(60)
 
 if __name__ == '__main__':
     # mp.set_start_method('spawn')
-    with open("sweep2.yaml", "r") as file:
+    with open("sweep4.yaml", "r") as file:
         sweep_config = yaml.safe_load(file) # Read yaml file to store hyperparameters 
 
     # Initialize sweep
@@ -67,8 +69,8 @@ if __name__ == '__main__':
     entity = "ee20d201-indian-institute-of-technology-madras"
     project = "DA6401_Assignment_3"
     # sweep_id = "yl23r4w9" # sweep1.yaml
-    # sweep_id = "86x4jb7r" # sweep2.yaml
-    # sweep_id = "j1h5tb43" # sweep3.yaml
+    # sweep_id = "y0aqmv4d" # sweep2.yaml
+    # sweep_id = "wc302bvu" # sweep3.yaml
     # sweep_id = "k9ldb4jj" # sweep1_100.yaml
     # sweep_id = "ex1e7bbi" # sweep4.yaml, finetuning sweep
     # api = wandb.Api() 
@@ -80,4 +82,4 @@ if __name__ == '__main__':
     #     print(f"Sweep {sweep.id} stopped after {len(sweep.runs)} runs.")
 
     # Start sweep agent
-    wandb.agent(sweep_id, function=train, count=25, project=project)  # Run 10 experiments
+    wandb.agent(sweep_id, function=train, count=15, project=project)  # Run 10 experiments

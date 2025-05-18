@@ -23,6 +23,7 @@ class Encoder(nn.Module):
         self.embedding = nn.Embedding(input_dim, emb_dim, padding_idx=pad_idx)
         self.dropout = nn.Dropout(p = dropout)
         self.rnn_type = rnn_type.lower()
+        self.num_layers = num_layers
 
         if self.rnn_type == 'rnn':
             self.rnn = nn.RNN(emb_dim, hidden_dim, num_layers,
@@ -65,6 +66,7 @@ class Decoder(nn.Module):
         self.dropout = nn.Dropout(p = dropout)
         self.rnn_type = rnn_type.lower()
         self.output_dim = output_dim
+        self.num_layers = num_layers
 
         if self.rnn_type == 'rnn':
             self.rnn = nn.RNN(emb_dim, hidden_dim, num_layers,
@@ -97,6 +99,22 @@ class Decoder(nn.Module):
 
         return prediction, hidden
 
+class Attention(nn.Module):
+    def __init__(self, hidden_dim):
+        super().__init__()
+        self.attn = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.v = nn.Linear(hidden_dim, 1, bias=False)
+
+    def forward(self, hidden, encoder_outputs):
+        # hidden: (batch_size, hidden_dim)
+        # encoder_outputs: (batch_size, src_len, hidden_dim)
+        src_len = encoder_outputs.size(1)
+
+        # Repeat hidden across src_len
+        hidden = hidden.unsqueeze(1).repeat(1, src_len, 1)  # (batch_size, src_len, hidden_dim)
+        energy = torch.tanh(self.attn(torch.cat((hidden, encoder_outputs), dim=2)))  # (batch_size, src_len, hidden_dim)
+        attention = self.v(energy).squeeze(2)  # (batch_size, src_len)
+        return torch.softmax(attention, dim=1)  # (batch_size, src_len)
 
 class Seq2Seq(nn.Module):
     '''
@@ -132,11 +150,7 @@ class Seq2Seq(nn.Module):
         # Encoder forward
         encoder_outputs, hidden = self.encoder(src)
 
-        if self.encoder.rnn_type == 'lstm':
-            hidden_state, cell = hidden
-            hidden = (hidden_state[-1:].contiguous(), cell[-1:].contiguous())
-        else:
-            hidden = hidden[-1:].contiguous()
+        hidden = self.match_encoder_decoder_hidden(hidden, self.decoder.num_layers)
 
         # First input to decoder is <sos>
         input_token = tgt[:, 0]
@@ -151,6 +165,28 @@ class Seq2Seq(nn.Module):
             input_token = tgt[:, t] if teacher_force else top1
 
         return outputs
+    
+    def adjust_layers(self, h, n_decoder):
+        n_encoder = h.size(0)
+        if n_encoder == n_decoder:
+            return h
+        elif n_encoder < n_decoder:
+            repeat_h = h[-1:].repeat(n_decoder - n_encoder, 1, 1)
+            return torch.cat([h, repeat_h], dim=0)
+        else:
+            return h[-n_decoder:]
+    
+    def match_encoder_decoder_hidden(self, hidden, num_decoder_layers):
+        
+        if isinstance(hidden, tuple):
+            # LSTM: hidden is (h_n, c_n)
+            h_n, c_n = hidden
+            h_n = self.adjust_layers(h_n, num_decoder_layers)
+            c_n = self.adjust_layers(c_n, num_decoder_layers)
+            return (h_n, c_n)
+        else:
+            # GRU/RNN: hidden is just h_n
+            return self.adjust_layers(hidden, num_decoder_layers)
 
     def inference(self, src, sos_idx, eos_idx, max_len=30):
         '''

@@ -1,0 +1,33 @@
+program: sweep_train.py  # or your training script name
+method: bayes  # "grid", "random", or "bayes"
+metric:
+  name: val_acc
+  goal: maximize
+
+parameters:
+  learning_rate:
+    values: [0.01]
+
+  encoder_embedding_size:
+    values: [16, 32, 64]
+
+  decoder_embedding_size:
+    values: [64, 128, 256]
+
+  hidden_layer_size:
+    values: [64, 128]
+
+  num_layers:
+    values: [1, 2, 3]
+
+  batch_size:
+    values: [32]
+
+  dropout_prob:
+    values: [0.3]
+
+  cell_type:
+    values: ['LSTM']
+
+  teacher_forcing:
+    values: [null]

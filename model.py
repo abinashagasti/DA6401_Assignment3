@@ -59,7 +59,7 @@ class Decoder(nn.Module):
         - output: predicted logits over vocabulary (batch_size, output_dim)
         - hidden: final hidden state(s), shape depends on RNN type
     '''
-    def __init__(self, output_dim, emb_dim, hidden_dim, num_layers=1, rnn_type='lstm', dropout=0.0, pad_idx=0):
+    def __init__(self, output_dim, emb_dim, hidden_dim, num_layers=1, rnn_type='lstm', dropout=0.0, pad_idx=0, use_attention=False):
         super().__init__()
 
         self.embedding = nn.Embedding(output_dim, emb_dim, padding_idx=pad_idx)
@@ -67,22 +67,29 @@ class Decoder(nn.Module):
         self.rnn_type = rnn_type.lower()
         self.output_dim = output_dim
         self.num_layers = num_layers
+        self.use_attention = use_attention
+
+        if self.use_attention:
+            self.attention = Attention(hidden_dim)  # Attention module
+
+            # If attention is used, we'll concatenate context vector with embedded input
+            input_dim = emb_dim + hidden_dim if self.use_attention else emb_dim
 
         if self.rnn_type == 'rnn':
-            self.rnn = nn.RNN(emb_dim, hidden_dim, num_layers,
+            self.rnn = nn.RNN(input_dim, hidden_dim, num_layers,
                               batch_first=True, dropout=dropout if num_layers > 1 else 0)
         elif self.rnn_type == 'gru':
-            self.rnn = nn.GRU(emb_dim, hidden_dim, num_layers,
+            self.rnn = nn.GRU(input_dim, hidden_dim, num_layers,
                               batch_first=True, dropout=dropout if num_layers > 1 else 0)
         elif self.rnn_type == 'lstm':
-            self.rnn = nn.LSTM(emb_dim, hidden_dim, num_layers,
+            self.rnn = nn.LSTM(input_dim, hidden_dim, num_layers,
                                batch_first=True, dropout=dropout if num_layers > 1 else 0)
         else:
             raise ValueError(f"Unsupported rnn_type: {rnn_type}")
 
         self.fc_out = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, input, hidden):
+    def forward(self, input, hidden, encoder_outputs=None):
         '''
         input: (batch_size) –  current input token ids
         hidden: hidden state(s) from previous time step
@@ -94,8 +101,24 @@ class Decoder(nn.Module):
         input = input.unsqueeze(1)  # (batch_size) → (batch_size, 1)
         embedded = self.dropout(self.embedding(input))  # (batch_size, 1, emb_dim)
 
-        output, hidden = self.rnn(embedded, hidden)  # output: (batch_size, 1, hidden_dim)
-        prediction = self.fc_out(output.squeeze(1))  # (batch_size, output_dim)
+        if not self.use_attention:
+            output, hidden = self.rnn(embedded, hidden)  # output: (batch_size, 1, hidden_dim)
+            prediction = self.fc_out(output.squeeze(1))  # (batch_size, output_dim)
+        else:
+            if isinstance(hidden, tuple):  # LSTM
+                last_hidden = hidden[0][-1]  # (batch_size, hidden_dim)
+            else:  # GRU/RNN
+                last_hidden = hidden[-1]
+
+            attn_weights = self.attention(last_hidden, encoder_outputs)  # (batch_size, src_len)
+            attn_weights = attn_weights.unsqueeze(1)  # (batch_size, 1, src_len)
+
+            context = torch.bmm(attn_weights, encoder_outputs)  # (batch_size, 1, hidden_dim)
+
+            rnn_input = torch.cat((embedded, context), dim=2)  # (batch_size, 1, emb_dim + hidden_dim)
+
+            output, hidden = self.rnn(rnn_input, hidden)
+            prediction = self.fc_out(output.squeeze(1))  # (batch_size, output_dim)
 
         return prediction, hidden
 
@@ -156,7 +179,10 @@ class Seq2Seq(nn.Module):
         input_token = tgt[:, 0]
 
         for t in range(1, tgt_len):
-            output, hidden = self.decoder(input_token, hidden)
+            if self.decoder.use_attention:
+                output, hidden = self.decoder(input_token, hidden, encoder_outputs)
+            else:
+                output, hidden = self.decoder(input_token, hidden)
             outputs[:, t] = output
 
             teacher_force = torch.rand(1).item() < teacher_forcing_ratio

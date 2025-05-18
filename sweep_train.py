@@ -71,8 +71,7 @@ if __name__ == '__main__':
     # sweep_id = "yl23r4w9" # sweep1.yaml
     # sweep_id = "y0aqmv4d" # sweep2.yaml
     # sweep_id = "wc302bvu" # sweep3.yaml
-    # sweep_id = "k9ldb4jj" # sweep1_100.yaml
-    # sweep_id = "ex1e7bbi" # sweep4.yaml, finetuning sweep
+    # sweep_id = "0elc0tt8" # sweep4.yaml, finetuning sweep
     # api = wandb.Api() 
 
     # sweep = api.sweep(f"{entity}/{project}/{sweep_id}")

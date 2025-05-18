@@ -26,13 +26,14 @@ def main(mode: str = 'train', wandb_log: bool = False):
     encoder_embedding_dim = 30
     decoder_embedding_dim = 67
     hidden_dim = 128
-    num_encoder_layers = 2
-    num_decoder_layers = 2
+    num_encoder_layers = 1
+    num_decoder_layers = 1
     rnn_type = 'LSTM'  # can be 'RNN' or 'LSTM' or 'GRU'
-    batch_size = 64
+    batch_size = 32
     num_epochs = 30
     learning_rate = 0.01
     dropout_prob = 0.3
+    use_attention = True
 
     # device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() and torch.backends.mps.is_built() else 'cpu')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -45,7 +46,7 @@ def main(mode: str = 'train', wandb_log: bool = False):
     encoder = Encoder(input_dim=len(src_vocab), emb_dim=encoder_embedding_dim, hidden_dim=hidden_dim,
                       num_layers=num_encoder_layers, rnn_type=rnn_type, dropout=dropout_prob).to(device)
     decoder = Decoder(output_dim=len(tgt_vocab), emb_dim=decoder_embedding_dim, hidden_dim=hidden_dim,
-                      num_layers=num_decoder_layers, rnn_type=rnn_type, dropout=dropout_prob).to(device)
+                      num_layers=num_decoder_layers, rnn_type=rnn_type, dropout=dropout_prob, use_attention=use_attention).to(device)
     model = Seq2Seq(encoder, decoder, device).to(device)
 
     if mode == 'train':

@@ -5,6 +5,14 @@ from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 import wandb, os
 
+import pandas as pd
+import Levenshtein, html
+from Levenshtein import distance as edit_distance
+from tabulate import tabulate
+from termcolor import colored
+
+from visualisation import *
+
 def compute_token_accuracy(preds, targets, pad_idx):
     mask = targets != pad_idx
     correct = (preds == targets).masked_select(mask).sum().item()
@@ -318,7 +326,10 @@ def beam_search_decode(model, src_tensor, src_vocab, tgt_vocab,
                     continue
 
                 # Decoder step
-                output, hidden_next = model.decoder(input_token, hidden_state)
+                if model.decoder.use_attention:
+                    output, hidden_next = model.decoder(input_token, hidden_state, encoder_outputs)
+                else:
+                    output, hidden_next = model.decoder(input_token, hidden_state)
                 output = output.squeeze(1)  # (1, vocab_size)
 
                 log_probs = torch.log_softmax(output, dim=-1)  # (1, vocab_size)
@@ -349,6 +360,88 @@ def beam_search_decode(model, src_tensor, src_vocab, tgt_vocab,
         best_seq = completed_sequences[0][0]
         return best_seq
 
+def test_model_alternate(model, test_loader, criterion, source_vocab, target_vocab, device, beam_validate=False, beam_width: int = 3, output_dir="predictions_vanilla", wandb_log=False, n=10):
+    os.makedirs(output_dir, exist_ok=True)
+    
+    token_correct = 0
+    token_total = 0
+    word_correct = 0
+    word_total = 0
+
+    predictions = []
+    sources = []
+    references = []
+
+    # --- Validation ---
+    model.eval()
+    test_loss = 0
+    test_token_correct = 0
+    test_word_correct = 0
+    test_token_total = 0
+    test_word_total = 0
+
+    with torch.no_grad():
+        for src_batch, tgt_batch in tqdm(test_loader, desc="Testing"):
+            src_batch = src_batch.to(device)
+            tgt_batch = tgt_batch.to(device)
+
+            outputs = model(src_batch, tgt_batch, teacher_forcing_ratio=0.0)
+ 
+            output_dim = outputs.size(-1)
+            outputs_flat = outputs[:, 1:].reshape(-1, output_dim)
+            tgt_flat = tgt_batch[:, 1:].reshape(-1)
+
+            loss = criterion(outputs_flat, tgt_flat)
+            test_loss += loss.item()
+
+            preds = outputs_flat.argmax(1)
+            if beam_validate:
+                correct, total = compute_token_accuracy_beam(model, src_batch, tgt_batch, source_vocab, target_vocab, beam_width=beam_width, max_len=50, device=device)
+            else:
+                correct, total = compute_token_accuracy(preds, tgt_flat, target_vocab.pad_idx)
+            test_token_correct += correct
+            test_token_total += total
+            preds_seq = outputs[:, 1:].argmax(2)
+            tgt_seq = tgt_batch[:, 1:]
+            correct, total = compute_sequence_accuracy(preds_seq, tgt_seq, target_vocab.pad_idx, min_match_ratio=1)
+            test_word_correct += correct
+            test_word_total += total
+
+            # Append decoded sequences for logging
+            for j in range(src_batch.size(0)):
+                src = src_batch[j].tolist()
+                tgt = tgt_batch[j].tolist()
+                pred = preds_seq[j].tolist()
+
+                # Decode sequences using vocab
+                src_str = source_vocab.decode(src)
+                tgt_str = target_vocab.decode(tgt)
+                pred_str = target_vocab.decode(pred)
+
+                sources.append(src_str)
+                references.append(tgt_str)
+                predictions.append(pred_str)
+
+            # mask = tgt_flat != pad_idx
+            # val_correct += (preds == tgt_flat).masked_select(mask).sum().item()
+            # val_total += mask.sum().item()
+
+    test_loss /= len(test_loader)
+    test_token_acc = test_token_correct / test_token_total * 100
+    test_acc = test_word_correct / test_word_total * 100
+
+    print(f"Test Results:\nTest Loss: {test_loss:.4f}\nToken Accuracy: {test_token_acc:.2f}%\nWord Accuracy: {test_acc:.2f}%")
+
+    with open(os.path.join(output_dir, "predictions.txt"), "w") as f:
+        # Write the header
+        f.write("SOURCE\tREFERENCE\tPREDICTION\n")
+        
+        # Write each row
+        for src, ref, pred in zip(sources, references, predictions):
+            f.write(f"{src}\t{ref}\t{pred}\n")
+
+    visualisation_table_color(os.path.join(output_dir, "predictions.txt"), n=n, wandb_log=wandb_log)
+
 def test_model(model, test_loader, source_vocab, target_vocab, device, beam_width: int = 3, output_dir="predictions_vanilla"):
     os.makedirs(output_dir, exist_ok=True)
     
@@ -376,7 +469,7 @@ def test_model(model, test_loader, source_vocab, target_vocab, device, beam_widt
                 # Reference tokens (excluding SOS, including EOS)
                 reference = tgt.squeeze(0).tolist()
 
-                correct, total = compute_token_accuracy_per_sample(pred_tokens, reference, pad_idx=target_vocab.pad_idx, eos_idx=target_vocab.eos_idx, device=devicec)
+                correct, total = compute_token_accuracy_per_sample(pred_tokens, reference, pad_idx=target_vocab.pad_idx, eos_idx=target_vocab.eos_idx, device=device)
                 
                 token_correct += correct
                 token_total += total
@@ -392,12 +485,20 @@ def test_model(model, test_loader, source_vocab, target_vocab, device, beam_widt
                 references.append(target_vocab.decode(reference))
 
     # Save predictions to file
+    # with open(os.path.join(output_dir, "predictions.txt"), "w") as f:
+    #     for src, ref, pred in zip(sources, references, predictions):
+    #         f.write(f"SOURCE     : {src}\n")
+    #         f.write(f"REFERENCE  : {ref}\n")
+    #         f.write(f"PREDICTION : {pred}\n")
+    #         f.write(f"{'-'*50}\n")
+                
     with open(os.path.join(output_dir, "predictions.txt"), "w") as f:
+        # Write the header
+        f.write("SOURCE\tREFERENCE\tPREDICTION\n")
+        
+        # Write each row
         for src, ref, pred in zip(sources, references, predictions):
-            f.write(f"SOURCE     : {src}\n")
-            f.write(f"REFERENCE  : {ref}\n")
-            f.write(f"PREDICTION : {pred}\n")
-            f.write(f"{'-'*50}\n")
+            f.write(f"{src}\t{ref}\t{pred}\n")
 
     # Print accuracy
     token_acc = token_correct / token_total * 100
@@ -408,9 +509,9 @@ def test_model(model, test_loader, source_vocab, target_vocab, device, beam_widt
     print(f"Word Accuracy (Exact Match): {word_acc:.2f}%")
 
     # Optional: print a creative grid
-    print("Sample Predictions:")
-    for i in range(5):
-        print(f"Input      : {sources[i]}")
-        print(f"Reference  : {references[i]}")
-        print(f"Prediction : {predictions[i]}")
-        print(f"{'-'*60}")
+    # print("Sample Predictions:")
+    # for i in range(5):
+    #     print(f"Input      : {sources[i]}")
+    #     print(f"Reference  : {references[i]}")
+    #     print(f"Prediction : {predictions[i]}")
+    #     print(f"{'-'*60}")

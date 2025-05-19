@@ -13,7 +13,7 @@ def train():
 
     # Experiment name
     wandb.run.name = f"lr_{config.learning_rate}_#emb_{config.encoder_embedding_size}_{config.decoder_embedding_size}_#layers_{config.num_layers}_\
-    _cell_{config.cell_type}_hs_{config.hidden_layer_size}_bs_{config.batch_size}_drop_{config.dropout_prob}_teacher_{config.teacher_forcing}"
+    cell_{config.cell_type}_hs_{config.hidden_layer_size}_bs_{config.batch_size}_drop_{config.dropout_prob}_teacher_{config.teacher_forcing}_beam_{config.beam_width}"
 
     # Configs
     data_dir = 'dakshina_dataset_v1.0'
@@ -34,6 +34,8 @@ def train():
     learning_rate = config.learning_rate
     dropout_prob = config.dropout_prob
     teacher_forcing_ratio = config.teacher_forcing
+    use_attention = True
+    beam_width = config.beam_width
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(device)
@@ -45,7 +47,7 @@ def train():
     encoder = Encoder(input_dim=len(src_vocab), emb_dim=encoder_embedding_dim, hidden_dim=hidden_dim,
                       num_layers=num_encoder_layers, rnn_type=rnn_type, dropout=dropout_prob).to(device)
     decoder = Decoder(output_dim=len(tgt_vocab), emb_dim=decoder_embedding_dim, hidden_dim=hidden_dim,
-                      num_layers=num_decoder_layers, rnn_type=rnn_type, dropout=dropout_prob).to(device)
+                      num_layers=num_decoder_layers, rnn_type=rnn_type, dropout=dropout_prob, use_attention=use_attention).to(device)
     model = Seq2Seq(encoder, decoder, device).to(device)
 
     # Loss and optimizer
@@ -55,13 +57,15 @@ def train():
 
     # Training loop
     train_model(model, train_loader, val_loader, optimizer, criterion, src_vocab, tgt_vocab, device, scheduler,
-                     num_epochs, teacher_forcing_ratio=teacher_forcing_ratio, accuracy_mode='both', patience=7, wandb_log=True, beam_validate=True)
+                     num_epochs, teacher_forcing_ratio=teacher_forcing_ratio, accuracy_mode='both', patience=7, wandb_log=True, beam_width=beam_width, beam_validate=False)
     
     time.sleep(60)
 
+    wandb.finish()
+
 if __name__ == '__main__':
     # mp.set_start_method('spawn')
-    with open("sweep4.yaml", "r") as file:
+    with open("sweep_att.yaml", "r") as file:
         sweep_config = yaml.safe_load(file) # Read yaml file to store hyperparameters 
 
     # Initialize sweep

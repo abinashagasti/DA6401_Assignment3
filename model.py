@@ -69,11 +69,9 @@ class Decoder(nn.Module):
         self.num_layers = num_layers
         self.use_attention = use_attention
 
-        if self.use_attention:
-            self.attention = Attention(hidden_dim)  # Attention module
-
-            # If attention is used, we'll concatenate context vector with embedded input
-            input_dim = emb_dim + hidden_dim if self.use_attention else emb_dim
+        self.attention = Attention(hidden_dim)  # Attention module
+        # If attention is used, we'll concatenate context vector with embedded input
+        input_dim = emb_dim + hidden_dim if self.use_attention else emb_dim
 
         if self.rnn_type == 'rnn':
             self.rnn = nn.RNN(input_dim, hidden_dim, num_layers,
@@ -89,7 +87,7 @@ class Decoder(nn.Module):
 
         self.fc_out = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, input, hidden, encoder_outputs=None):
+    def forward(self, input, hidden, encoder_outputs=None, return_attention=False):
         '''
         input: (batch_size) –  current input token ids
         hidden: hidden state(s) from previous time step
@@ -120,7 +118,10 @@ class Decoder(nn.Module):
             output, hidden = self.rnn(rnn_input, hidden)
             prediction = self.fc_out(output.squeeze(1))  # (batch_size, output_dim)
 
-        return prediction, hidden
+        if return_attention:
+            return prediction, hidden, attn_weights
+        else:
+            return prediction, hidden
 
 class Attention(nn.Module):
     def __init__(self, hidden_dim):
@@ -173,6 +174,7 @@ class Seq2Seq(nn.Module):
         # Encoder forward
         encoder_outputs, hidden = self.encoder(src)
 
+        # Make encoder hidden output compatible with decoder if num_layers are different in both networks
         hidden = self.match_encoder_decoder_hidden(hidden, self.decoder.num_layers)
 
         # First input to decoder is <sos>

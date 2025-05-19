@@ -9,7 +9,7 @@ from utils import *
 def main(mode: str = 'train', wandb_log: bool = False):
     user = "ee20d201-indian-institute-of-technology-madras"
     project = "DA6401_Assignment_3"
-    display_name = "test_run"
+    display_name = "visualisation_table_attention"
 
     if wandb_log:
         wandb.init(entity=user, project=project, name=display_name)
@@ -23,17 +23,22 @@ def main(mode: str = 'train', wandb_log: bool = False):
     dev_path = os.path.join(data_dir, lang, subfolder_dir, f'{lang}.translit.sampled.dev.tsv')
     test_path = os.path.join(data_dir, lang, subfolder_dir, f'{lang}.translit.sampled.test.tsv')
 
-    encoder_embedding_dim = 30
-    decoder_embedding_dim = 67
+    encoder_embedding_dim = 32
+    decoder_embedding_dim = 128
     hidden_dim = 128
-    num_encoder_layers = 1
-    num_decoder_layers = 1
+    num_encoder_layers = 2
+    num_decoder_layers = 2
     rnn_type = 'LSTM'  # can be 'RNN' or 'LSTM' or 'GRU'
     batch_size = 32
     num_epochs = 30
-    learning_rate = 0.01
-    dropout_prob = 0.3
+    learning_rate = 0.005
+    dropout_prob = 0.2
     use_attention = True
+    if use_attention:
+        output_dir = 'predictions_attention'
+    else:
+        output_dir = 'predictions_vanilla'
+    teacher_forcing_ratio = 0.75
 
     # device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() and torch.backends.mps.is_built() else 'cpu')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -46,7 +51,7 @@ def main(mode: str = 'train', wandb_log: bool = False):
     encoder = Encoder(input_dim=len(src_vocab), emb_dim=encoder_embedding_dim, hidden_dim=hidden_dim,
                       num_layers=num_encoder_layers, rnn_type=rnn_type, dropout=dropout_prob).to(device)
     decoder = Decoder(output_dim=len(tgt_vocab), emb_dim=decoder_embedding_dim, hidden_dim=hidden_dim,
-                      num_layers=num_decoder_layers, rnn_type=rnn_type, dropout=dropout_prob, use_attention=use_attention).to(device)
+                      num_layers=num_decoder_layers, rnn_type=rnn_type, dropout=dropout_prob, use_attention=True).to(device)
     model = Seq2Seq(encoder, decoder, device).to(device)
 
     if mode == 'train':
@@ -57,17 +62,28 @@ def main(mode: str = 'train', wandb_log: bool = False):
 
         # Training loop
         train_model(model, train_loader, val_loader, optimizer, criterion, src_vocab, tgt_vocab, device, scheduler,
-                     num_epochs, teacher_forcing_ratio=None, accuracy_mode='both', patience=7, wandb_log=wandb_log, beam_validate=False)
+                     num_epochs, teacher_forcing_ratio=teacher_forcing_ratio, accuracy_mode='both', patience=7, wandb_log=wandb_log, beam_validate=True, beam_width=3)
     
     elif mode == 'test':
         # Load checkpoint
-        checkpoint = torch.load('best_model.pth', map_location=device, weights_only=True)
+        checkpoint = torch.load('best_att.pth', map_location=device, weights_only=True)
+        criterion = nn.CrossEntropyLoss(ignore_index=tgt_vocab.pad_idx)
 
         # Load model weights
         model.load_state_dict(checkpoint['model_state_dict'])
         model.to(device)
         model.eval()
-        test_model(model, test_loader, src_vocab, tgt_vocab, device, beam_width=3, output_dir="predictions_vanilla")
+        test_model_alternate(model, test_loader, criterion, src_vocab, tgt_vocab, device, beam_validate=True, output_dir=output_dir, wandb_log=wandb_log, n=20)
+        # plot_attention_heatmaps(
+        #     model,
+        #     test_loader=test_loader,
+        #     source_vocab=src_vocab,
+        #     target_vocab=tgt_vocab,
+        #     device=device,
+        #     prediction_file="predictions_attention/predictions.txt",
+        #     num_samples=10,
+        #     wandb_log=False
+        # )
 
     else:
         raise ValueError(f"mode = {mode} \nMode should be a string taking value either 'train' or 'test'.")

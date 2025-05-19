@@ -1,12 +1,12 @@
 program: sweep_train.py  # or your training script name
-method: grid  # "grid", "random", or "bayes"
+method: bayes  # "grid", "random", or "bayes"
 metric:
   name: val_acc
   goal: maximize
 
 parameters:
   learning_rate:
-    values: [0.01]
+    values: [0.01, 0.005, 0.001]
 
   encoder_embedding_size:
     values: [32]
@@ -24,13 +24,13 @@ parameters:
     values: [32]
 
   dropout_prob:
-    values: [0.2]
+    values: [0, 0.2, 0.3]
 
   cell_type:
     values: ['LSTM']
 
   teacher_forcing:
-    values: [0.75]
+    values: [null, 0.75, 1]
 
   beam_width:
-    values: [1, 3, 5]
+    values: [3]

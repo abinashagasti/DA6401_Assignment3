@@ -197,122 +197,79 @@ def sample_from_testset(test_loader, num_samples=10):
     return sampled_src, sampled_tgt
 
 
-def plot_attention_heatmaps(model, test_loader):
-    
-    sampled_src, sampled_tgt = sample_from_testset(test_loader) # get 10 samples from the test set
-    
-
-
-def plot_attention_heatmaps(model, test_loader, source_vocab, target_vocab, device,
-                             prediction_file="predictions_attention/predictions.txt", 
-                             num_samples=10, wandb_log=False):
-    # Load the predictions
-    df = pd.read_csv(prediction_file, sep="\t")
-    assert len(df) > 0, "Prediction file is empty."
-
-    # Sample indices
-    sample_indices = random.sample(range(len(df)), num_samples)
-    sampled_df = df.iloc[sample_indices].reset_index(drop=True)
-
-    def decode(tokens, vocab):
-        return [vocab.idx_to_token[idx] for idx in tokens if idx not in {vocab.pad_idx, vocab.eos_idx, vocab.sos_idx}]
-
-    fig, axs = plt.subplots(3, 3, figsize=(18, 12))
-    axs = axs.flatten()
+def predict_with_attention(model, src, sos_idx, eos_idx, max_len=30):
+    '''
+    src: (1, src_len) – tokenized input sequence
+    Returns:
+        - predictions: list of token IDs (excluding <sos>)
+        - attention_weights: list of attention tensors, one per target step (each: [1, src_len])
+    '''
     model.eval()
-    count = 0
+    predictions = []
+    attentions = []
 
     with torch.no_grad():
-        for i in range(num_samples):
-            src_text = sampled_df.loc[i, "SOURCE"]
-            pred_text = sampled_df.loc[i, "PREDICTION"]
+        encoder_outputs, hidden = model.encoder(src)
+        hidden = model.match_encoder_decoder_hidden(hidden, model.decoder.num_layers)
 
-            try:
-                src_tokens = [source_vocab.token_to_idx[c] for c in src_text]
-            except KeyError:
-                print(f"Skipping unknown chars in: {src_text}")
-                continue
+        input_token = torch.tensor([sos_idx], device=model.device)  # start with <sos>
 
-            src_tensor = torch.tensor(
-                [source_vocab.sos_idx] + src_tokens + [source_vocab.eos_idx], device=device
-            ).unsqueeze(0)
+        for _ in range(max_len):
+            output, hidden, attn = model.decoder(input_token, hidden, encoder_outputs, return_attention=True)
 
-            # Predict with attention
-            pred_tokens, attention_weights = beam_search_decode_with_attention(
-                model, src_tensor, source_vocab, target_vocab,
-                beam_width=3, max_len=50, device=device
-            )
-
-            src_decoded = decode(src_tensor.squeeze().tolist(), source_vocab)
-            pred_decoded = decode(pred_tokens, target_vocab)
-
-            if attention_weights is None or attention_weights.shape[0] == 0:
-                print(f"⚠️ No attention weights for sample {i}")
-                continue
-
-            ax = axs[count]
-            sns.heatmap(
-                attention_weights[:len(pred_decoded), :len(src_decoded)].squeeze(1),
-                xticklabels=src_decoded,
-                yticklabels=pred_decoded,
-                cmap="viridis",
-                cbar=True,
-                ax=ax
-            )
-            ax.set_xlabel("Source Tokens")
-            ax.set_ylabel("Predicted Tokens")
-            ax.set_title(f"Sample {i+1}")
-            count += 1
-            if count == 9:
+            top1 = output.argmax(1).item()
+            if top1 == eos_idx:
                 break
+            predictions.append(top1)
+            attentions.append(attn.squeeze(1).cpu())  # remove (1) dimension, shape: [src_len]
 
-    plt.tight_layout()
+            input_token = torch.tensor([top1], device=model.device)
 
-    # Log to W&B if needed
-    if wandb_log:
-        buf = BytesIO()
-        plt.savefig(buf, format="png")
-        buf.seek(0)
-        wandb.log({"Attention Heatmaps": wandb.Image(buf, caption="9 Sample Attention Heatmaps")})
-        buf.close()
+    # Stack attentions into a (tgt_len, src_len) tensor
+    attn_tensor = torch.stack(attentions) if attentions else torch.empty(0)
+    return predictions, attn_tensor  # both on CPU
 
-    plt.show()
-
-def beam_search_decode_with_attention(model, src_tensor, src_vocab, tgt_vocab, beam_width, max_len, device):
-    # Encode
-    encoder_outputs, hidden = model.encoder(src_tensor)
+def plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device='cpu'):
+    """
+    Plots attention heatmaps for 10 sampled test sequences.
     
-    beams = [([tgt_vocab.sos_idx], 0.0, hidden, [])]  # seq, score, hidden, attention_list
-    completed = []
+    model: the trained Seq2Seq model
+    test_loader: DataLoader with test data
+    tgt_vocab: target vocab object (with idx_to_token and eos_idx, sos_idx)
+    src_vocab: optional, if you want to decode source indices to tokens
+    device: 'cpu' or 'cuda'
+    """
+    model.eval()
+    sampled_src, _ = sample_from_testset(test_loader)
 
-    for _ in range(max_len):
-        new_beams = []
-        for seq, score, hidden_state, attn_seq in beams:
-            if seq[-1] == tgt_vocab.eos_idx:
-                completed.append((seq, score, attn_seq))
-                continue
+    for i, src_tensor in enumerate(sampled_src):
+        src = src_tensor.unsqueeze(0).to(device)
+        predicted_ids, attn_tensor = predict_with_attention(model, src, tgt_vocab.sos_idx, tgt_vocab.eos_idx)
 
-            input_token = torch.tensor([seq[-1]], device=device)
-            output, hidden_next, attention = model.decoder(input_token, hidden_state, encoder_outputs, return_attention=True)
+        # Decode tokens (optional)
+        if src_vocab:
+            src_tokens = [src_vocab.idx_to_token[idx] for idx in src_tensor.tolist()]
+        else:
+            src_tokens = [str(idx.item()) for idx in src_tensor]  # fallback: just index
 
-            log_probs = torch.log_softmax(output.squeeze(1), dim=-1)
-            topk_log_probs, topk_indices = log_probs.topk(beam_width)
+        tgt_tokens = [tgt_vocab.idx_to_token[idx] for idx in predicted_ids]
 
-            for i in range(beam_width):
-                token = topk_indices[0,i].item()
-                log_prob = topk_log_probs[0,i].item()
-                new_seq = seq + [token]
-                new_attn_seq = attn_seq + [attention.squeeze(0).cpu()]
-                new_beams.append((new_seq, score + log_prob, hidden_next, new_attn_seq))
+        print(attn_tensor.squeeze(1).cpu().numpy())
 
-        beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_width]
+        # attn_tensor: (tgt_len, src_len)
+        plt.figure(figsize=(10, 6))
+        sns.heatmap(attn_tensor.squeeze(1).cpu().numpy(), 
+                    xticklabels=src_tokens, 
+                    yticklabels=tgt_tokens, 
+                    cmap="viridis", 
+                    cbar=True, 
+                    linewidths=0.5, 
+                    annot=True, 
+                    fmt=".2f")
 
-        if all(seq[-1] == tgt_vocab.eos_idx for seq, _, _, _ in beams):
-            completed.extend(beams)
-            break
-
-    # Best sequence
-    best_seq, _, attn_seq = sorted(completed, key=lambda x: x[1], reverse=True)[0]
-    attn_tensor = torch.stack(attn_seq)  # (tgt_len, src_len)
-
-    return best_seq, attn_tensor
+        plt.xlabel("Source tokens")
+        plt.ylabel("Predicted tokens")
+        plt.title(f"Attention Heatmap {i+1}")
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()

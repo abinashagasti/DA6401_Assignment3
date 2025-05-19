@@ -73,17 +73,8 @@ def main(mode: str = 'train', wandb_log: bool = False):
         model.load_state_dict(checkpoint['model_state_dict'])
         model.to(device)
         model.eval()
-        test_model_alternate(model, test_loader, criterion, src_vocab, tgt_vocab, device, beam_validate=True, output_dir=output_dir, wandb_log=wandb_log, n=20)
-        # plot_attention_heatmaps(
-        #     model,
-        #     test_loader=test_loader,
-        #     source_vocab=src_vocab,
-        #     target_vocab=tgt_vocab,
-        #     device=device,
-        #     prediction_file="predictions_attention/predictions.txt",
-        #     num_samples=10,
-        #     wandb_log=False
-        # )
+        # test_model_alternate(model, test_loader, criterion, src_vocab, tgt_vocab, device, beam_validate=True, output_dir=output_dir, wandb_log=wandb_log, n=20)
+        plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device)
 
     else:
         raise ValueError(f"mode = {mode} \nMode should be a string taking value either 'train' or 'test'.")
@@ -92,6 +83,6 @@ def main(mode: str = 'train', wandb_log: bool = False):
         wandb.finish()
 
 if __name__ == '__main__':
-    mode = 'train'
+    mode = 'test'
     wandb_log = False
     main(mode, wandb_log) 

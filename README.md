@@ -79,6 +79,10 @@ python3 main.py -m test --cell_type lstm --language hi
 python3 main.py --help
 ```
 
+### Sweep files
+
+Several sweep files have been used to obtain the best model for the transliteration task. The details regarding the sweeps used have been provided in the wandb report. 
+
 ## Reports
 
 Wandb Link: https://wandb.ai/ee20d201-indian-institute-of-technology-madras/DA6401_Assignment_3/reports/Assignment-3--VmlldzoxMjc3NzE4NA?accessToken=6qe8m8eih74sw57h231sm097d8tn2ydgt1yb76w6ttacxtokn6jx7d9oicwrr1zz

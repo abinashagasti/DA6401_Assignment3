@@ -15,7 +15,7 @@ def train():
     wandb.run.name = f"lr_{config.learning_rate}_#emb_{config.encoder_embedding_size}_{config.decoder_embedding_size}_#layers_{config.num_layers}_\
     cell_{config.cell_type}_hs_{config.hidden_layer_size}_bs_{config.batch_size}_drop_{config.dropout_prob}_teacher_{config.teacher_forcing}_beam_{config.beam_width}"
 
-    # Configs
+    # Configure hyperparameters
     data_dir = 'dakshina_dataset_v1.0'
     lang = 'hi'  # Hindi
     subfolder_dir = 'lexicons'

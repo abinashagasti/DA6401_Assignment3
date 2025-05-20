@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
+import numpy as np
 
 import wandb, os, random
 from io import BytesIO
@@ -87,6 +89,7 @@ def visualisation_table_color(file_path="predictions_vanilla/predictions.txt", n
         </tr>
     """
 
+    # create table from the sampled dataframe
     for _, row in sampled_df.iterrows():
         ref = row["REFERENCE"]
         pred = row["PREDICTION"]
@@ -134,6 +137,7 @@ def compare_attention_vs_vanilla_sampled(vanilla_file="predictions_vanilla/predi
     # Collect cases where attention is correct and vanilla is wrong
     rows = []
     for i in range(len(df_vanilla)):
+        # get source, reference, vanilla_prediction, attention_prediction
         src = str(df_vanilla.loc[i, "SOURCE"])
         ref = str(df_vanilla.loc[i, "REFERENCE"])
         pred_vanilla = str(df_vanilla.loc[i, "PREDICTION"])
@@ -142,6 +146,7 @@ def compare_attention_vs_vanilla_sampled(vanilla_file="predictions_vanilla/predi
         is_vanilla_correct = pred_vanilla == ref
         is_attention_correct = pred_attention == ref
 
+        # log data if attention prediction is correct and vanilla prediction is incorred
         if not is_vanilla_correct and is_attention_correct:
             rows.append({
                 "SOURCE": src,
@@ -153,10 +158,10 @@ def compare_attention_vs_vanilla_sampled(vanilla_file="predictions_vanilla/predi
             })
 
     result_df = pd.DataFrame(rows)
-    print(f"✅ Found {len(result_df)} cases where attention succeeded but vanilla failed.")
+    print(f"Found {len(result_df)} cases where attention succeeded but vanilla failed.")
 
     if result_df.empty:
-        print("⚠️ No qualifying rows to sample or log.")
+        print("No qualifying rows to sample or log.")
         return None
 
     # Sample from the result
@@ -172,10 +177,9 @@ def compare_attention_vs_vanilla_sampled(vanilla_file="predictions_vanilla/predi
             if counter>sample_n:
                 break
         wandb.log({wandb_table_name: table})
-        print(f"📤 Logged a random sample of {len(sampled_df)} cases to W&B table `{wandb_table_name}`")
+        print(f"Logged a random sample of {len(sampled_df)} cases to W&B table `{wandb_table_name}`")
 
     return sampled_df
-
 
 def sample_from_testset(test_loader, num_samples=10):
     all_src = []
@@ -195,7 +199,6 @@ def sample_from_testset(test_loader, num_samples=10):
 
     return sampled_src, sampled_tgt
 
-
 def predict_with_attention(model, src, sos_idx, eos_idx, max_len=30):
     '''
     src: (1, src_len) – tokenized input sequence
@@ -203,26 +206,27 @@ def predict_with_attention(model, src, sos_idx, eos_idx, max_len=30):
         - predictions: list of token IDs (excluding <sos>)
         - attention_weights: list of attention tensors, one per target step (each: [1, src_len])
     '''
-    model.eval()
+    model.eval() 
     predictions = []
     attentions = []
 
     with torch.no_grad():
-        encoder_outputs, hidden = model.encoder(src)
-        hidden = model.match_encoder_decoder_hidden(hidden, model.decoder.num_layers)
+        encoder_outputs, hidden = model.encoder(src) # pass through encoder
+        hidden = model.match_encoder_decoder_hidden(hidden, model.decoder.num_layers) 
+        # adjust hidden state depending on encoder and decoder number of layers
 
         input_token = torch.tensor([sos_idx], device=model.device)  # start with <sos>
 
         for _ in range(max_len):
             output, hidden, attn = model.decoder(input_token, hidden, encoder_outputs, return_attention=True)
-
-            top1 = output.argmax(1).item()
+            # pass through decoder and get attention weights used
+            top1 = output.argmax(1).item() # best token prediction
             if top1 == eos_idx:
                 break
-            predictions.append(top1)
+            predictions.append(top1) 
             attentions.append(attn.squeeze(1).cpu())  # remove (1) dimension, shape: [src_len]
 
-            input_token = torch.tensor([top1], device=model.device)
+            input_token = torch.tensor([top1], device=model.device) # feed predicted token to next time step
 
     # Stack attentions into a (tgt_len, src_len) tensor
     attn_tensor = torch.stack(attentions) if attentions else torch.empty(0)
@@ -298,3 +302,153 @@ def plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device='cp
         plt.tight_layout()
         wandb.log({"attention_grid": wandb.Image(fig)})
         plt.close(fig)
+
+def compute_connectivity(model, src_tensor, tgt_tensor, device='cpu'):
+    """
+    Computes the connectivity matrix for a single input-output pair.
+
+    Returns:
+        connectivity: (T_tgt-1, T_src) matrix of connectivity values
+        src_tokens: list of input tokens
+        tgt_tokens: list of target tokens
+    """
+    model.eval()
+    src_tensor = src_tensor.unsqueeze(0).to(device)  # [1, T_src]
+    tgt_tensor = tgt_tensor.unsqueeze(0).to(device)  # [1, T_tgt]
+
+    # === MANUAL ENCODER PASS ===
+    # 1. Get embeddings
+    embedded_src = model.encoder.embedding(src_tensor)  # [1, T_src, emb_dim]
+    embedded_src.requires_grad_()  # Enables gradient tracking
+    embedded_src.retain_grad()
+
+    # 2. Run through encoder manually
+    encoder_outputs, hidden = model.encoder.rnn(embedded_src)
+
+    # 3. Match hidden shape for decoder
+    hidden = model.match_encoder_decoder_hidden(hidden, model.decoder.num_layers)
+
+    # === MANUAL DECODER PASS ===
+    batch_size = 1
+    tgt_len = tgt_tensor.size(1)
+    output_dim = model.decoder.output_dim
+    T_src = src_tensor.shape[1]
+    connectivity = torch.zeros(tgt_len - 1, T_src).to(device)
+
+    input_token = tgt_tensor[:, 0]  # <sos>
+
+    for t in range(1, tgt_len):
+        model.zero_grad()
+
+        if model.decoder.use_attention:
+            output, hidden = model.decoder(input_token, hidden, encoder_outputs)
+        else:
+            output, hidden = model.decoder(input_token, hidden)
+
+        # Get correct class for this timestep
+        correct_class = tgt_tensor[:, t]  # shape: [1]
+        logit_scalar = output[0, correct_class]  # scalar tensor
+
+        # Compute gradient
+        logit_scalar.backward(retain_graph=True)
+
+        # Gradient wrt input embeddings
+        grad = embedded_src.grad  # shape: [1, T_src, emb_dim]
+        if grad is not None:
+            grad_norms = grad[0].detach().norm(dim=-1) ** 2  # [T_src]
+            connectivity[t - 1] = grad_norms
+
+        embedded_src.grad.zero_()
+        input_token = tgt_tensor[:, t]  # Force teacher input
+
+    # Convert to numpy
+    connectivity_matrix = connectivity.detach().cpu().numpy()
+
+    # Tokens
+    src_tokens = src_tensor[0].tolist()
+    tgt_tokens = tgt_tensor[0][1:].tolist()  # exclude <sos>
+
+    return connectivity_matrix, src_tokens, tgt_tokens
+
+def get_random_correct_prediction(filepath, target_vocab, max_trials=1000):
+    """
+    Returns a tuple (source_tokens, target_tokens, prediction_tokens)
+    for a correct prediction (i.e., prediction == target)
+    """
+    with open(filepath, "r", encoding="utf-8") as f:
+        lines = f.readlines()[1:]  # skip header
+    
+    correct_samples = []
+    for line in lines:
+        src_str, tgt_str, pred_str = line.strip().split("\t") 
+        # get source, target and prediction strings 
+
+        # Convert to token indices
+        tgt_tokens = target_vocab.encode(tgt_str)
+        pred_tokens = target_vocab.encode(pred_str)
+
+        # Remove pad and sos tokens before comparison
+        def clean(tokens):
+            return [t for t in tokens if t != target_vocab.pad_idx and t != target_vocab.sos_idx]
+
+        tgt_clean = clean(tgt_tokens)
+        pred_clean = clean(pred_tokens)
+
+        if tgt_clean == pred_clean: # collect accurate predictions
+            correct_samples.append((src_str, tgt_str, pred_str))
+
+    if not correct_samples:
+        print("No correct predictions found.")
+        return None
+
+    return random.choice(correct_samples)
+
+def plot_connectivity(model, src_vocab, tgt_vocab, filepath='predictions_attention/predictions.txt', device='cpu', max_trials=1000, wandb_log=False):
+
+    sample = get_random_correct_prediction(filepath, tgt_vocab, max_trials)
+    src_str, tgt_str, pred_str = sample
+    # Print actual strings
+    print("Source string:", src_str)
+    print("Target string:", tgt_str)
+    print("Predicted string:", pred_str)
+
+    src_tokens = src_vocab.encode(src_str)
+    tgt_tokens = tgt_vocab.encode(tgt_str)
+
+    # Add <sos> and <eos>
+    src_tensor = torch.tensor(src_tokens, dtype=torch.long)
+    tgt_tensor = torch.tensor([tgt_vocab.sos_idx] + tgt_tokens + [tgt_vocab.eos_idx], dtype=torch.long)
+
+    conn_matrix, src_tokens, tgt_tokens = compute_connectivity(model, src_tensor, tgt_tensor, device=device)
+
+    # Define special token indices
+    SPECIAL_TOKENS = {tgt_vocab.sos_idx, tgt_vocab.eos_idx, tgt_vocab.pad_idx}
+
+    # Identify non-special tokens
+    src_mask = [idx not in SPECIAL_TOKENS for idx in src_tokens]
+    tgt_mask = [idx not in SPECIAL_TOKENS for idx in tgt_tokens]
+
+    # Filter connectivity and indices
+    filtered_connectivity = conn_matrix[np.ix_(tgt_mask, src_mask)]
+    # Filter src and tgt tokens to exclude special tokens
+    filtered_src_tokens = [tok for tok in src_tokens if tok not in SPECIAL_TOKENS]
+    filtered_tgt_tokens = [tok for tok in tgt_tokens if tok not in SPECIAL_TOKENS]
+
+    # Plot using token indices as labels
+    plt.figure(figsize=(10, 6))
+    sns.heatmap(filtered_connectivity, 
+                xticklabels=filtered_src_tokens, 
+                yticklabels=filtered_tgt_tokens, 
+                cmap='viridis')
+
+    plt.xlabel("Input tokens")
+    plt.ylabel("Output tokens")
+    plt.title("Connectivity heatmap")
+    plt.tight_layout()
+    
+    # Log to WandB
+    if wandb_log:
+        wandb.log({"connectivity_heatmap": wandb.Image(plt.gcf())})
+
+    plt.show()
+    plt.close()

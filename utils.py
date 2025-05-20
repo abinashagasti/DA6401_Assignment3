@@ -14,30 +14,41 @@ from termcolor import colored
 from visualisation import *
 
 def compute_token_accuracy(preds, targets, pad_idx):
+    # Create a mask to ignore padding tokens in the target sequence
     mask = targets != pad_idx
+    # Compare predictions and targets, apply the mask to ignore padding, and count correct predictions
     correct = (preds == targets).masked_select(mask).sum().item()
+    # Count the total number of non-padding tokens
     total = mask.sum().item()
+
     return correct, total
 
 def compute_token_accuracy_per_sample(pred_tokens, reference, pad_idx, eos_idx, device):
+    # Trim predicted tokens to stop at the first EOS token (inclusive), skipping the SOS token at index 0
     if eos_idx in pred_tokens:
         pred_tokens = pred_tokens[1:pred_tokens.index(eos_idx)+1]
     else:
-        pred_tokens = pred_tokens[1:]
+        pred_tokens = pred_tokens[1:] # If no EOS found, just skip SOS
+
+    # Similarly, trim the reference tokens at the first EOS token (inclusive), skipping SOS
     if eos_idx in reference:
         reference = reference[1:reference.index(eos_idx)+1]
     else:
         reference = reference[1:] 
 
+    # Pad the shorter sequence so both have equal length
     if len(pred_tokens)<len(reference):
         pred_tokens = pred_tokens + [pad_idx] * (len(reference) - len(pred_tokens))
     elif len(pred_tokens)>len(reference):
         reference = reference + [pad_idx] * (len(pred_tokens) - len(reference))
     
+    # Convert both lists to tensors and move them to the specified device
     targets = torch.tensor(reference).to(device)
     preds = torch.tensor(pred_tokens).to(device)
     
+    # Count the number of exact matches
     correct = (preds == targets).sum().item()
+    # Total number of tokens compared (after padding)
     total = targets.size(0)
 
     return correct, total
@@ -75,9 +86,11 @@ def compute_sequence_accuracy(preds, targets, pad_idx, min_match_ratio=1.0):
         pred_seq = pred_seq.tolist()
         tgt_seq = tgt_seq.tolist()
 
+        # remove padded tokens
         pred_trimmed = [x for x in pred_seq if x != pad_idx]
         tgt_trimmed = [x for x in tgt_seq if x != pad_idx]
 
+        # check if match percentage of word is greater than min_match_ratio
         match_count = sum(p == t for p, t in zip(pred_trimmed, tgt_trimmed))
         required = int(min(len(tgt_trimmed), len(pred_trimmed)) * min_match_ratio)
 
@@ -126,20 +139,24 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, source_vo
         train_bar = tqdm(train_loader, desc=f"Epoch {epoch} [Train]", leave=False)
 
         for src_batch, tgt_batch in train_bar:
+            # get source and target batches
             src_batch = src_batch.to(device)
             tgt_batch = tgt_batch.to(device)
 
             optimizer.zero_grad()
 
+            # set automatic teacher_forcing if ratio input is None
             if teacher_forcing_ratio is None:
                 teacher_forcing_ratio = max(0.5 * (0.99 ** epoch), 0.1)
 
-            outputs = model(src_batch, tgt_batch, teacher_forcing_ratio=teacher_forcing_ratio)
+            outputs = model(src_batch, tgt_batch, teacher_forcing_ratio=teacher_forcing_ratio) # forward pass through model
 
             output_dim = outputs.size(-1)
             outputs_flat = outputs[:, 1:].reshape(-1, output_dim)
             tgt_flat = tgt_batch[:, 1:].reshape(-1)
+            # resizing tensors for future computation
 
+            # compute loss and do backward pass
             loss = criterion(outputs_flat, tgt_flat)
             loss.backward()
             optimizer.step()
@@ -147,6 +164,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, source_vo
             train_loss += loss.item()
 
             preds = outputs_flat.argmax(1)
+            # compute token and word based accuracy using custom built function
             if accuracy_mode == 'token':
                 correct, total = compute_token_accuracy(preds, tgt_flat, pad_idx)
                 train_correct += correct
@@ -194,18 +212,22 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, source_vo
 
         with torch.no_grad():
             for src_batch, tgt_batch in val_bar:
+                # get source and target batches
                 src_batch = src_batch.to(device)
                 tgt_batch = tgt_batch.to(device)
 
-                outputs = model(src_batch, tgt_batch, teacher_forcing_ratio=0.0)
+                outputs = model(src_batch, tgt_batch, teacher_forcing_ratio=0.0) # forward pass
+                # no teacher_forcing during validation
 
                 outputs_flat = outputs[:, 1:].reshape(-1, output_dim)
                 tgt_flat = tgt_batch[:, 1:].reshape(-1)
 
+                # compute loss
                 loss = criterion(outputs_flat, tgt_flat)
                 val_loss += loss.item()
 
                 preds = outputs_flat.argmax(1)
+                # compute token and word based accuracy using custom built functions
                 if accuracy_mode == 'token':
                     if beam_validate:
                         correct, total = compute_token_accuracy_beam(model, src_batch, tgt_batch, source_vocab, target_vocab, beam_width=beam_width, max_len=50, device=device)
@@ -256,6 +278,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, source_vo
                     "validation_accuracy": val_acc
                 })    
         
+        # Print epoch information
         if accuracy_mode == 'token' or accuracy_mode == 'word':
             print(f"Epoch {epoch:02d} ➤ "
               f"Train Loss: {train_loss:.4f}, Acc ({accuracy_mode}): {train_acc:.2f}% | "
@@ -323,7 +346,7 @@ def beam_search_decode(model, src_tensor, src_vocab, tgt_vocab,
                 input_token = torch.tensor([seq[-1]], device=device)
                 if seq[-1] == tgt_vocab.eos_idx:
                     completed_sequences.append((seq, score))
-                    continue
+                    continue # skip loop if sequence eos has been predicted
 
                 # Decoder step
                 if model.decoder.use_attention:
@@ -336,6 +359,7 @@ def beam_search_decode(model, src_tensor, src_vocab, tgt_vocab,
                 topk_log_probs, topk_indices = log_probs.topk(beam_width)  # (1, beam)
 
                 for i in range(beam_width):
+                    # store top beam_width predictions 
                     token = topk_indices[0, i].item()
                     token_log_prob = topk_log_probs[0, i].item()
 
@@ -361,18 +385,14 @@ def beam_search_decode(model, src_tensor, src_vocab, tgt_vocab,
         return best_seq
 
 def test_model_alternate(model, test_loader, criterion, source_vocab, target_vocab, device, beam_validate=False, beam_width: int = 3, output_dir="predictions_vanilla", wandb_log=False, n=10):
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True) # Ensure the output directory exists
     
-    token_correct = 0
-    token_total = 0
-    word_correct = 0
-    word_total = 0
-
+    # Store sequences for logging and evaluation
     predictions = []
     sources = []
     references = []
 
-    # --- Validation ---
+    # Initialize counters for accuracy
     model.eval()
     test_loss = 0
     test_token_correct = 0
@@ -380,20 +400,25 @@ def test_model_alternate(model, test_loader, criterion, source_vocab, target_voc
     test_token_total = 0
     test_word_total = 0
 
+    # Disable gradient computation for evaluation
     with torch.no_grad():
         for src_batch, tgt_batch in tqdm(test_loader, desc="Testing"):
             src_batch = src_batch.to(device)
             tgt_batch = tgt_batch.to(device)
 
+            # Forward pass with teacher forcing turned off
             outputs = model(src_batch, tgt_batch, teacher_forcing_ratio=0.0)
  
+            # Flatten outputs and targets for loss computation
             output_dim = outputs.size(-1)
             outputs_flat = outputs[:, 1:].reshape(-1, output_dim)
             tgt_flat = tgt_batch[:, 1:].reshape(-1)
 
+            # Compute loss
             loss = criterion(outputs_flat, tgt_flat)
             test_loss += loss.item()
 
+            # compute token and word level accuracy
             preds = outputs_flat.argmax(1)
             if beam_validate:
                 correct, total = compute_token_accuracy_beam(model, src_batch, tgt_batch, source_vocab, target_vocab, beam_width=beam_width, max_len=50, device=device)
@@ -442,76 +467,76 @@ def test_model_alternate(model, test_loader, criterion, source_vocab, target_voc
 
     visualisation_table_color(os.path.join(output_dir, "predictions.txt"), n=n, wandb_log=wandb_log)
 
-def test_model(model, test_loader, source_vocab, target_vocab, device, beam_width: int = 3, output_dir="predictions_vanilla"):
-    os.makedirs(output_dir, exist_ok=True)
+# def test_model(model, test_loader, source_vocab, target_vocab, device, beam_width: int = 3, output_dir="predictions_vanilla"):
+#     os.makedirs(output_dir, exist_ok=True)
     
-    token_correct = 0
-    token_total = 0
-    word_correct = 0
-    word_total = 0
+#     token_correct = 0
+#     token_total = 0
+#     word_correct = 0
+#     word_total = 0
 
-    predictions = []
-    sources = []
-    references = []
+#     predictions = []
+#     sources = []
+#     references = []
 
-    with torch.no_grad():
-        for i, (src_batch, tgt_batch) in enumerate(tqdm(test_loader, desc="Testing")):
-            src_batch = src_batch.to(device)
-            tgt_batch = tgt_batch.to(device)
+#     with torch.no_grad():
+#         for i, (src_batch, tgt_batch) in enumerate(tqdm(test_loader, desc="Testing")):
+#             src_batch = src_batch.to(device)
+#             tgt_batch = tgt_batch.to(device)
 
-            for j in range(src_batch.size(0)):
-                src = src_batch[j].unsqueeze(0)  # shape: [1, src_len]
-                tgt = tgt_batch[j].unsqueeze(0)  # shape: [1, tgt_len]
+#             for j in range(src_batch.size(0)):
+#                 src = src_batch[j].unsqueeze(0)  # shape: [1, src_len]
+#                 tgt = tgt_batch[j].unsqueeze(0)  # shape: [1, tgt_len]
 
-                # Beam search decoding
-                pred_tokens = beam_search_decode(model, src_tensor=src, src_vocab=source_vocab, tgt_vocab=target_vocab, beam_width=beam_width, max_len=50, device=device)
+#                 # Beam search decoding
+#                 pred_tokens = beam_search_decode(model, src_tensor=src, src_vocab=source_vocab, tgt_vocab=target_vocab, beam_width=beam_width, max_len=50, device=device)
                 
-                # Reference tokens (excluding SOS, including EOS)
-                reference = tgt.squeeze(0).tolist()
+#                 # Reference tokens (excluding SOS, including EOS)
+#                 reference = tgt.squeeze(0).tolist()
 
-                correct, total = compute_token_accuracy_per_sample(pred_tokens, reference, pad_idx=target_vocab.pad_idx, eos_idx=target_vocab.eos_idx, device=device)
+#                 correct, total = compute_token_accuracy_per_sample(pred_tokens, reference, pad_idx=target_vocab.pad_idx, eos_idx=target_vocab.eos_idx, device=device)
                 
-                token_correct += correct
-                token_total += total
+#                 token_correct += correct
+#                 token_total += total
                 
-                if pred_tokens == reference:
-                    word_correct += 1
-                word_total += 1
+#                 if pred_tokens == reference:
+#                     word_correct += 1
+#                 word_total += 1
 
-                # Save input/prediction/reference for logging
-                src_tokens = src.squeeze(0).tolist()
-                sources.append(source_vocab.decode(src_tokens))
-                predictions.append(target_vocab.decode(pred_tokens))
-                references.append(target_vocab.decode(reference))
+#                 # Save input/prediction/reference for logging
+#                 src_tokens = src.squeeze(0).tolist()
+#                 sources.append(source_vocab.decode(src_tokens))
+#                 predictions.append(target_vocab.decode(pred_tokens))
+#                 references.append(target_vocab.decode(reference))
 
-    # Save predictions to file
-    # with open(os.path.join(output_dir, "predictions.txt"), "w") as f:
-    #     for src, ref, pred in zip(sources, references, predictions):
-    #         f.write(f"SOURCE     : {src}\n")
-    #         f.write(f"REFERENCE  : {ref}\n")
-    #         f.write(f"PREDICTION : {pred}\n")
-    #         f.write(f"{'-'*50}\n")
+#     # Save predictions to file
+#     # with open(os.path.join(output_dir, "predictions.txt"), "w") as f:
+#     #     for src, ref, pred in zip(sources, references, predictions):
+#     #         f.write(f"SOURCE     : {src}\n")
+#     #         f.write(f"REFERENCE  : {ref}\n")
+#     #         f.write(f"PREDICTION : {pred}\n")
+#     #         f.write(f"{'-'*50}\n")
                 
-    with open(os.path.join(output_dir, "predictions.txt"), "w") as f:
-        # Write the header
-        f.write("SOURCE\tREFERENCE\tPREDICTION\n")
+#     with open(os.path.join(output_dir, "predictions.txt"), "w") as f:
+#         # Write the header
+#         f.write("SOURCE\tREFERENCE\tPREDICTION\n")
         
-        # Write each row
-        for src, ref, pred in zip(sources, references, predictions):
-            f.write(f"{src}\t{ref}\t{pred}\n")
+#         # Write each row
+#         for src, ref, pred in zip(sources, references, predictions):
+#             f.write(f"{src}\t{ref}\t{pred}\n")
 
-    # Print accuracy
-    token_acc = token_correct / token_total * 100
-    word_acc = word_correct / word_total * 100
+#     # Print accuracy
+#     token_acc = token_correct / token_total * 100
+#     word_acc = word_correct / word_total * 100
 
-    print(f"Test Results:")
-    print(f"Token Accuracy: {token_acc:.2f}%")
-    print(f"Word Accuracy (Exact Match): {word_acc:.2f}%")
+#     print(f"Test Results:")
+#     print(f"Token Accuracy: {token_acc:.2f}%")
+#     print(f"Word Accuracy (Exact Match): {word_acc:.2f}%")
 
-    # Optional: print a creative grid
-    # print("Sample Predictions:")
-    # for i in range(5):
-    #     print(f"Input      : {sources[i]}")
-    #     print(f"Reference  : {references[i]}")
-    #     print(f"Prediction : {predictions[i]}")
-    #     print(f"{'-'*60}")
+#     # Optional: print a creative grid
+#     # print("Sample Predictions:")
+#     # for i in range(5):
+#     #     print(f"Input      : {sources[i]}")
+#     #     print(f"Reference  : {references[i]}")
+#     #     print(f"Prediction : {predictions[i]}")
+#     #     print(f"{'-'*60}")

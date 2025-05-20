@@ -10,13 +10,13 @@ from utils import *
 def main(args):
     user = "ee20d201-indian-institute-of-technology-madras"
     project = "DA6401_Assignment_3"
-    display_name = "attention_heatmaps"
+    display_name = args.wandb_display_name
 
     if args.wandb_log:
         wandb.init(entity=user, project=project, name=display_name)
         # wandb.run.name = display_name
     
-    # Configs
+    # Configure hyperparameters
     data_dir = args.data_directory#'dakshina_dataset_v1.0'
     lang = args.language #'hi'  # Hindi
     subfolder_dir = 'lexicons'
@@ -46,7 +46,7 @@ def main(args):
     print(device)
 
     # Get dataloaders
-    train_loader, val_loader, test_loader, src_vocab, tgt_vocab = prepare_dataloaders(train_path, dev_path, test_path, batch_size, repeat_datapoints=True, num_workers=4)
+    train_loader, val_loader, test_loader, src_vocab, tgt_vocab = prepare_dataloaders(train_path, dev_path, test_path, batch_size, repeat_datapoints=True, num_workers=1)
 
     # Initialize models
     encoder = Encoder(input_dim=len(src_vocab), emb_dim=encoder_embedding_dim, hidden_dim=hidden_dim,
@@ -67,15 +67,19 @@ def main(args):
     
     elif args.mode == 'test':
         # Load checkpoint
-        checkpoint = torch.load('best_att.pth', map_location=device, weights_only=True)
+        if use_attention:
+            checkpoint = torch.load('best_att.pth', map_location=device, weights_only=True)
+        else:
+            checkpoint = torch.load('best.pth', map_location=device, weights_only=True)
         criterion = nn.CrossEntropyLoss(ignore_index=tgt_vocab.pad_idx)
 
         # Load model weights
         model.load_state_dict(checkpoint['model_state_dict'])
         model.to(device)
         model.eval()
-        # test_model_alternate(model, test_loader, criterion, src_vocab, tgt_vocab, device, beam_validate=True, output_dir=output_dir, wandb_log=wandb_log, n=20)
-        plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device, 10, args.wandb_log)
+        test_model_alternate(model, test_loader, criterion, src_vocab, tgt_vocab, device, beam_validate=True, output_dir=output_dir, wandb_log=args.wandb_log, n=20)
+        # plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device, 10, args.wandb_log)
+        # plot_connectivity(model, src_vocab, tgt_vocab, filepath='predictions_attention/predictions.txt', device=device, wandb_log=args.wandb_log)
 
     else:
         raise ValueError(f"mode = {args.mode} \nMode should be a string taking value either 'train' or 'test'.")
@@ -92,6 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("-wp","--wandb_project",default="DA6401_Assignment_2", help="Project name used to track experiments in Weights & Biases dashboard",type=str)
     parser.add_argument("-we","--wandb_entity",default="ee20d201-indian-institute-of-technology-madras", help="Wandb Entity used to track experiments in the Weights & Biases dashboard",type=str)
     parser.add_argument("-d","--data_directory",default="dakshina_dataset_v1.0",type=str,help="Path containing dakshina dataset.")
+    parser.add_argument("-name","--wandb_display_name",default="test_run",type=str,help="Wandb run display name.")
     parser.add_argument("-l","--language",default="hi",type=str,help="Language of transliteration.")
     parser.add_argument("-e","--epochs",default=20,help="Number of epochs to train neural network",type=int)
     parser.add_argument("-enc","--encoder_embedding_dim",default=32,help="Encoder embedding dimension",type=int)

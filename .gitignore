@@ -4,6 +4,4 @@ dakshina_dataset_v1.0/
 saved_models/
 .ipynb_checkpoints/
 __pycache__/
-predictions_vanilla/
-predictions_attention/
 wandb/

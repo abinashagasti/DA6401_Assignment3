@@ -20,10 +20,10 @@ class Encoder(nn.Module):
     def __init__(self, input_dim, emb_dim, hidden_dim, num_layers=1, rnn_type='lstm', dropout=0.0, pad_idx=0):
         super().__init__()
 
-        self.embedding = nn.Embedding(input_dim, emb_dim, padding_idx=pad_idx)
-        self.dropout = nn.Dropout(p = dropout)
-        self.rnn_type = rnn_type.lower()
-        self.num_layers = num_layers
+        self.embedding = nn.Embedding(input_dim, emb_dim, padding_idx=pad_idx) # embedding layer
+        self.dropout = nn.Dropout(p = dropout) # dropout layer after embedding
+        self.rnn_type = rnn_type.lower() # rnn type 
+        self.num_layers = num_layers # number of hidden layers in the encoder
 
         if self.rnn_type == 'rnn':
             self.rnn = nn.RNN(emb_dim, hidden_dim, num_layers,
@@ -62,12 +62,12 @@ class Decoder(nn.Module):
     def __init__(self, output_dim, emb_dim, hidden_dim, num_layers=1, rnn_type='lstm', dropout=0.0, pad_idx=0, use_attention=False):
         super().__init__()
 
-        self.embedding = nn.Embedding(output_dim, emb_dim, padding_idx=pad_idx)
-        self.dropout = nn.Dropout(p = dropout)
-        self.rnn_type = rnn_type.lower()
-        self.output_dim = output_dim
-        self.num_layers = num_layers
-        self.use_attention = use_attention
+        self.embedding = nn.Embedding(output_dim, emb_dim, padding_idx=pad_idx) # embedding layer of decoder
+        self.dropout = nn.Dropout(p = dropout) # dropout layer
+        self.rnn_type = rnn_type.lower() # rnn type
+        self.output_dim = output_dim # output vocabulary size of target
+        self.num_layers = num_layers # number of hidden layers in the decoder
+        self.use_attention = use_attention # bool denoting whether the decoder uses attention
 
         self.attention = Attention(hidden_dim)  # Attention module
         # If attention is used, we'll concatenate context vector with embedded input
@@ -182,30 +182,34 @@ class Seq2Seq(nn.Module):
 
         for t in range(1, tgt_len):
             if self.decoder.use_attention:
-                output, hidden = self.decoder(input_token, hidden, encoder_outputs)
+                output, hidden = self.decoder(input_token, hidden, encoder_outputs) # send encoder outputs if decoder uses attention
             else:
-                output, hidden = self.decoder(input_token, hidden)
+                output, hidden = self.decoder(input_token, hidden) # encoder outputs not required if decoder does not use attention
             outputs[:, t] = output
 
-            teacher_force = torch.rand(1).item() < teacher_forcing_ratio
-            top1 = output.argmax(1)
+            teacher_force = torch.rand(1).item() < teacher_forcing_ratio # bool denoting if teacher forcing is active
+            top1 = output.argmax(1) # best predicted output token
 
-            input_token = tgt[:, t] if teacher_force else top1
+            input_token = tgt[:, t] if teacher_force else top1 
+            # feed target token if teacher_forcing is enabled else feed previous predicted output
 
         return outputs
     
     def adjust_layers(self, h, n_decoder):
+        # helps adjust the hidden output if number of encoder and decoder hidden layers are different
         n_encoder = h.size(0)
         if n_encoder == n_decoder:
             return h
         elif n_encoder < n_decoder:
+            # if lesser number of encoder layers are there then repeat last hidden layer of encoder
             repeat_h = h[-1:].repeat(n_decoder - n_encoder, 1, 1)
             return torch.cat([h, repeat_h], dim=0)
         else:
+            # if lesser number of decoder layers than encoder then send last few hidden layers of encoder
             return h[-n_decoder:]
     
     def match_encoder_decoder_hidden(self, hidden, num_decoder_layers):
-        
+        # separately treat lstm and rnn/gru layers
         if isinstance(hidden, tuple):
             # LSTM: hidden is (h_n, c_n)
             h_n, c_n = hidden

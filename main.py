@@ -1,44 +1,45 @@
 import torch
 from torch import nn, optim
 import os
+import argparse
 
 from data_preprocess import *
 from model import *
 from utils import *
 
-def main(mode: str = 'train', wandb_log: bool = False):
+def main(args):
     user = "ee20d201-indian-institute-of-technology-madras"
     project = "DA6401_Assignment_3"
-    display_name = "visualisation_table_attention"
+    display_name = "attention_heatmaps"
 
-    if wandb_log:
+    if args.wandb_log:
         wandb.init(entity=user, project=project, name=display_name)
         # wandb.run.name = display_name
     
     # Configs
-    data_dir = 'dakshina_dataset_v1.0'
-    lang = 'hi'  # Hindi
+    data_dir = args.data_directory#'dakshina_dataset_v1.0'
+    lang = args.language #'hi'  # Hindi
     subfolder_dir = 'lexicons'
     train_path = os.path.join(data_dir, lang, subfolder_dir, f'{lang}.translit.sampled.train.tsv')
     dev_path = os.path.join(data_dir, lang, subfolder_dir, f'{lang}.translit.sampled.dev.tsv')
     test_path = os.path.join(data_dir, lang, subfolder_dir, f'{lang}.translit.sampled.test.tsv')
 
-    encoder_embedding_dim = 32
-    decoder_embedding_dim = 128
-    hidden_dim = 128
-    num_encoder_layers = 2
-    num_decoder_layers = 2
-    rnn_type = 'LSTM'  # can be 'RNN' or 'LSTM' or 'GRU'
-    batch_size = 32
-    num_epochs = 30
-    learning_rate = 0.005
-    dropout_prob = 0.2
-    use_attention = True
+    encoder_embedding_dim = args.encoder_embedding_dim # 32
+    decoder_embedding_dim = args.decoder_embedding_dim # 128
+    hidden_dim = args.hidden_dim # 128
+    num_encoder_layers = args.num_encoder_layers # 2
+    num_decoder_layers = args.num_decoder_layers # 2
+    rnn_type = args.cell_type  # can be 'RNN' or 'LSTM' or 'GRU'
+    batch_size = args.batch_size
+    num_epochs = args.epochs
+    learning_rate = args.learning_rate
+    dropout_prob = args.dropout
+    use_attention = args.use_attention
     if use_attention:
         output_dir = 'predictions_attention'
     else:
         output_dir = 'predictions_vanilla'
-    teacher_forcing_ratio = 0.75
+    teacher_forcing_ratio = args.teacher_forcing
 
     # device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() and torch.backends.mps.is_built() else 'cpu')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -54,7 +55,7 @@ def main(mode: str = 'train', wandb_log: bool = False):
                       num_layers=num_decoder_layers, rnn_type=rnn_type, dropout=dropout_prob, use_attention=True).to(device)
     model = Seq2Seq(encoder, decoder, device).to(device)
 
-    if mode == 'train':
+    if args.mode == 'train':
         # Loss and optimizer
         criterion = nn.CrossEntropyLoss(ignore_index=tgt_vocab.pad_idx)
         optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
@@ -62,9 +63,9 @@ def main(mode: str = 'train', wandb_log: bool = False):
 
         # Training loop
         train_model(model, train_loader, val_loader, optimizer, criterion, src_vocab, tgt_vocab, device, scheduler,
-                     num_epochs, teacher_forcing_ratio=teacher_forcing_ratio, accuracy_mode='both', patience=7, wandb_log=wandb_log, beam_validate=True, beam_width=3)
+                     num_epochs, teacher_forcing_ratio=teacher_forcing_ratio, accuracy_mode='both', patience=7, wandb_log=args.wandb_log, beam_validate=True, beam_width=3)
     
-    elif mode == 'test':
+    elif args.mode == 'test':
         # Load checkpoint
         checkpoint = torch.load('best_att.pth', map_location=device, weights_only=True)
         criterion = nn.CrossEntropyLoss(ignore_index=tgt_vocab.pad_idx)
@@ -74,15 +75,38 @@ def main(mode: str = 'train', wandb_log: bool = False):
         model.to(device)
         model.eval()
         # test_model_alternate(model, test_loader, criterion, src_vocab, tgt_vocab, device, beam_validate=True, output_dir=output_dir, wandb_log=wandb_log, n=20)
-        plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device)
+        plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device, 10, args.wandb_log)
 
     else:
-        raise ValueError(f"mode = {mode} \nMode should be a string taking value either 'train' or 'test'.")
+        raise ValueError(f"mode = {args.mode} \nMode should be a string taking value either 'train' or 'test'.")
     
-    if wandb_log:
+    if args.wandb_log:
         wandb.finish()
 
-if __name__ == '__main__':
-    mode = 'test'
-    wandb_log = False
-    main(mode, wandb_log) 
+# if __name__ == '__main__':
+#     mode = 'test'
+#     wandb_log = True
+#     main(mode, wandb_log) 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-wp","--wandb_project",default="DA6401_Assignment_2", help="Project name used to track experiments in Weights & Biases dashboard",type=str)
+    parser.add_argument("-we","--wandb_entity",default="ee20d201-indian-institute-of-technology-madras", help="Wandb Entity used to track experiments in the Weights & Biases dashboard",type=str)
+    parser.add_argument("-d","--data_directory",default="dakshina_dataset_v1.0",type=str,help="Path containing dakshina dataset.")
+    parser.add_argument("-l","--language",default="hi",type=str,help="Language of transliteration.")
+    parser.add_argument("-e","--epochs",default=20,help="Number of epochs to train neural network",type=int)
+    parser.add_argument("-enc","--encoder_embedding_dim",default=32,help="Encoder embedding dimension",type=int)
+    parser.add_argument("-dec","--decoder_embedding_dim",default=128,help="Decoder embedding dimension",type=int)
+    parser.add_argument("-hid","--hidden_dim",default=128,help="Hidden dimension",type=int)
+    parser.add_argument("-b","--batch_size",default=32,help="Batch size used to train neural network",type=int)
+    parser.add_argument("-da","--use_attention",default=True,action="store_false",help="Use data augmentation for training.")
+    parser.add_argument("-nel","--num_encoder_layers",default=2,help="Number of hidden encoder layers.",type=int)
+    parser.add_argument("-ndl","--num_decoder_layers",default=2,help="Number of hidden decoder layers.",type=int)
+    parser.add_argument("-drprob","--dropout",default=0.2,type=float,help="Dropout prob.")
+    parser.add_argument("-teach","--teacher_forcing",default=0.75,help="Padding used in each layer.",type=float)
+    parser.add_argument("-lr","--learning_rate",default=0.005, help="Learning rate used to optimize model parameters",type=float)
+    parser.add_argument("-w_d","--weight_decay",default=0.0001, help="Weight decay used by optimizers",type=float)
+    parser.add_argument("-m","--mode",default='train',choices = ['train','test'], help="Activation functions",type=str)
+    parser.add_argument("-cell","--cell_type",default='lstm',choices = ['rnn','lstm','gru'], help="Activation functions",type=str)
+    parser.add_argument("-wbl","--wandb_log",default=False,action="store_true", help="Login data onto wandb.ai")
+    args = parser.parse_args()
+    main(args)

@@ -39,7 +39,6 @@ def visualisation_table(file_path="predictions_vanilla/predictions.txt", n = 10,
     )
 
     # Display on terminal
-    from tabulate import tabulate
     print(tabulate(sampled_df[["SOURCE", "REFERENCE", "PREDICTION", "EditDistance", "Status"]],
                    headers="keys", tablefmt="fancy_grid"))
 
@@ -229,7 +228,7 @@ def predict_with_attention(model, src, sos_idx, eos_idx, max_len=30):
     attn_tensor = torch.stack(attentions) if attentions else torch.empty(0)
     return predictions, attn_tensor  # both on CPU
 
-def plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device='cpu'):
+def plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device='cpu', num_samples=10, wandb_log=False):
     """
     Plots attention heatmaps for 10 sampled test sequences.
     
@@ -240,21 +239,26 @@ def plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device='cp
     device: 'cpu' or 'cuda'
     """
     model.eval()
-    sampled_src, _ = sample_from_testset(test_loader)
+    sampled_src, _ = sample_from_testset(test_loader, num_samples)
+    attn_tensors = []
+    all_src_tokens = []
+    all_tgt_tokens = []
 
     for i, src_tensor in enumerate(sampled_src):
         src = src_tensor.unsqueeze(0).to(device)
         predicted_ids, attn_tensor = predict_with_attention(model, src, tgt_vocab.sos_idx, tgt_vocab.eos_idx)
+        attn_tensors.append(attn_tensor.squeeze(1).cpu().numpy())
 
         # Decode tokens (optional)
-        if src_vocab:
-            src_tokens = [src_vocab.idx_to_token[idx] for idx in src_tensor.tolist()]
-        else:
-            src_tokens = [str(idx.item()) for idx in src_tensor]  # fallback: just index
+        # if src_vocab:
+        #     src_tokens = [src_vocab.idx_to_token[idx] for idx in src_tensor.tolist()]
+        # else:
+        src_tokens = [str(idx.item()) for idx in src_tensor]  # fallback: just index
+        tgt_tokens = [str(idx) for idx in predicted_ids]  
 
-        tgt_tokens = [tgt_vocab.idx_to_token[idx] for idx in predicted_ids]
-
-        print(attn_tensor.squeeze(1).cpu().numpy())
+        all_src_tokens.append(src_tokens)
+        all_tgt_tokens.append(tgt_tokens)
+        # tgt_tokens = [tgt_vocab.idx_to_token[idx] for idx in predicted_ids]
 
         # attn_tensor: (tgt_len, src_len)
         plt.figure(figsize=(10, 6))
@@ -272,4 +276,25 @@ def plot_attention_heatmaps(model, test_loader, tgt_vocab, src_vocab, device='cp
         plt.title(f"Attention Heatmap {i+1}")
         plt.xticks(rotation=45)
         plt.tight_layout()
-        plt.show()
+        # plt.show()
+        # Log 9 images (3x3 grid) – we can only show 9, the 10th will be ignored here
+    if wandb_log:
+        fig, axs = plt.subplots(3, 3, figsize=(15, 12))  # 3×3 grid
+
+        for i in range(9):
+            ax = axs[i // 3][i % 3]  # access subplot in 2D
+            attn = attn_tensors[i].squeeze()  # shape: (tgt_len, src_len)
+
+            sns.heatmap(
+                attn,
+                xticklabels=all_src_tokens[i],
+                yticklabels=all_tgt_tokens[i],
+                ax=ax,
+                cbar=False
+            )
+            ax.set_title(f"Sample {i+1}")
+            ax.tick_params(axis='x', rotation=90)
+
+        plt.tight_layout()
+        wandb.log({"attention_grid": wandb.Image(fig)})
+        plt.close(fig)
